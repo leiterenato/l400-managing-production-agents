@@ -638,10 +638,12 @@ tipo de saída do agente do Caso 1?
   derivação virava YAML estático e o Spike B (Failure Clusters) sumia. Arco agora macro→micro→mezzo→macro.
 
 **Pendências dos slides do Caso 1:**
-- **Número real de escala** (ordem de grandeza) no Slide 4, Reveal 6 — o usuário preenche; nunca inventar.
+- **Escala do Google no Slide 4, Reveal 6** — ✅ RESOLVIDO (2026-07-07): **qualitativo, SEM número** ("roda em produção no Google / I can't share the numbers"). Usuário não pode citar números do Google; a prova concreta é a demo (Reveal 5). Não reintroduzir número.
+- **Títulos de palco** — ✅ CRAVADOS (2026-07-07). Slide 4 e título ajustados pelo usuário. Set recomendado: S1 "Why 'it passed' isn't enough" · S2 "Life of a request" · S3 "Write the test before the agent" · S4 "The Quality Flywheel" (subtítulos em §15).
+- **Slide 4 refeito** — ✅ (2026-07-07): Failure Clusters de volta como nó-herói + gate com 2 ramos + anel de volta; título "The Quality Flywheel". Spec em §15.5.
 - **Fronteira de mock das demos** — spec + recomendação documentadas em §15.6; o usuário confirma ao construir (demos ficam pra depois; slides primeiro).
-- **Títulos de palco dos Slides 3 e 4** — recomendados ("Eval-Driven Development" / "The Quality Flywheel"), não cravados.
 - **Domínio verificável confirma invariantes como estrela** (§12) — já refletido (financeiro: refund/PII).
+- **Verificar Semana 1:** confirmar na doc pública o método `generate_loss_clusters`, a taxonomia default e o status (GA/Preview) do Failure Clusters — o Slide 4 depende visualmente desse nó.
 
 ---
 
@@ -1059,25 +1061,37 @@ quebrada).
 reference-free** (AutoRaters sobre trajetória, sem gabarito). A forma é antiga; a semente e o juiz
 são o que muda.
 
-**O flywheel (frame — perto da imagem que você já montou, + o nó `Failure Clusters`):**
+**Título recomendado (cravado 2026-07-07):** **"The Quality Flywheel"** · subtítulo *"The eval keeps
+itself alive — and tells you why it broke."* (NÃO "Cold Start and Production Traces" — cold start é o
+Slide 3; este título erra o alvo do slide, que é matar o **rot** + dar o **porquê**.)
+
+**O flywheel (frame central — refeito 2026-07-07):**
 
 ```mermaid
 flowchart LR
-  C["Behavior contract"]:::seed -->|derive| D["EDD-derived cases"]:::seed
-  D --> ES["Eval set"]:::core
+  %% ---- seed arc (green): kills cold start ----
+  C["Behavior contract<br/>tools · policies · attacks"]:::seed
+  D["EDD-derived cases<br/>happy · policy · adversarial"]:::seed
+  ES["Eval set"]:::core
+  C -->|"derive · before the agent"| D --> ES
+
+  %% ---- gate: both branches ----
   ES --> GATE{"Gate<br/>Cloud Build + eval"}:::gate
   GATE -->|green| PROD["Agent in production"]:::prod
-  GATE -.->|"red · regression"| STOP["deploy blocked"]:::stop
+  GATE -.->|"red · regression"| STOP["Deploy blocked"]:::stop
+
+  %% ---- refill arc (production): kills rot ----
   PROD -->|"OTel spans · from Slide 2"| TR[("Traces")]:::prod
   TR --> AR["AutoRaters<br/>score · no golden answer"]:::core
-  AR --> FC["Failure Clusters<br/>names WHY it failed"]:::why
-  FC --> NEW["surprises & failures<br/>become new cases"]:::core
-  NEW --> ES
+  AR --> FC["★ Failure Clusters<br/>names WHY it failed · ×N"]:::why
+  FC --> NEW["Surprises & failures<br/>become new cases"]:::core
+  NEW -.->|refill| ES
+
   classDef seed fill:#E6F4EA,stroke:#34A853,color:#137333;
   classDef core fill:#E8F0FE,stroke:#1A73E8,color:#174EA6;
   classDef gate fill:#FEF7E0,stroke:#F9AB00,color:#B06000;
   classDef prod fill:#F1F3F4,stroke:#5F6368,color:#3C4043;
-  classDef why fill:#FCE8E6,stroke:#D93025,color:#A50E0E;
+  classDef why fill:#FCE8E6,stroke:#D93025,color:#A50E0E,stroke-width:4px;
   classDef stop fill:#5B0A06,stroke:#A50E0E,color:#FFFFFF;
 ```
 
@@ -1085,13 +1099,20 @@ flowchart LR
 start**. Arco de **produção** (prod → traces → AutoRaters → Failure Clusters → novos cases → set) =
 reabastecimento → mata o **rot**. Gate: verde deploya, vermelho bloqueia (Cloud Build, **não** nativo).
 
-**O zoom do "porquê" (um case que falhou, aberto — texto, não Mermaid):**
+**⚠️ Erro do build anterior a NÃO repetir:** a versão construída (screenshot "Cold Start and Production
+Traces") **dropou o nó Failure Clusters** (AutoRaters ia direto pra "Surprises & failures") e o ramo
+**Deploy blocked**. Failure Clusters é o **2º depth spike** (`case-1.md §4`) — ele é o **nó-herói**
+(borda vermelha grossa, ★) e não pode sair do desenho. Layout: flywheel no **centro**; **topo-direita
+fica livre** durante o loop (é onde o anel entra no reveal 8, mesma posição da caixa do Slide 1); o
+zoom do "porquê" é um **callout que sai do nó Failure Clusters** (reveal 4).
+
+**O zoom do "porquê" (callout que sai do nó Failure Clusters — texto, não Mermaid · reveal 4):**
 
 ```
-one failing case, opened:
-  output      "Refund processed."                ← looks fine   (the 8% disaster)
-  trajectory  charge_lookup → issue_refund        ← skipped read_customer   ✗
-  cluster     "Incorrect Tool Selection"  ×37     ← named · grouped · counted
+one failing case, opened
+  output       "Refund processed."               ← looks fine   (the 8% disaster)
+  trajectory   look-up SKIPPED → issue_refund    ← never read the customer   ✗
+  cluster      "Incorrect Tool Selection"  ×37   ← named · grouped · counted
 ```
 
 **Recado:** o **output** parecia certo (invisível!); só a **trajetória** (capturada pelo substrato)
@@ -1100,18 +1121,24 @@ quantas vezes — vira causa-raiz que o time conserta (prompt? tool? dado?), nã
 
 **A chave de ouro — o anel de volta ao Slide 1** *(o fecho do caso âncora):*
 
-O Slide 1 terminou com a caixa vermelha no topo-direita: **"The Green Score Lies"** + 2 perguntas. O
-**último reveal** do Slide 4 traz **a mesma caixa, na mesma posição**, e a vira:
+O Slide 1 terminou com a caixa vermelha no topo-direita: **"The Green Score Lies"** + 2 perguntas
+(texto EXATO do slide construído: *"1. How to start (solving the initial cold start) · 2. How to keep
+it alive & trustworthy over time"*). O **último reveal** do Slide 4 traz **a mesma caixa, na mesma
+posição**, virada para verde, respondendo as **mesmas 2 perguntas na mesma ordem** (a rima tem que ser
+exata):
 
 ```
-Slide 1 abriu:                          Case 1 fecha (mesma caixa, mesmo canto, virada):
-┌───────────────────────────┐          ┌────────────────────────────────────┐
-│ THE GREEN SCORE LIES       │   ──►    │ THE GREEN SCORE — EARNED            │
-│ • judge with no golden?    │          │ ✓ hard checks + a judge      (S2)  │
-│ • where do cases come      │          │ ✓ contract seeds it                │
-│   from — and stay alive?   │          │ ✓ production refills it · names it  │
-└───────────────────────────┘          │   (S3–S4)                          │
-                                         └────────────────────────────────────┘
+Slide 1 abriu (vermelho):                    Case 1 fecha (mesma caixa, mesmo canto, verde):
+┌────────────────────────────────┐          ┌──────────────────────────────────────────────┐
+│ THE GREEN SCORE LIES           │   ──►    │ ✓ THE GREEN SCORE — EARNED                   │
+│ 1. How to start                │          │   Both questions, answered:                   │
+│    (cold start)                │          │   1. How to start, no data → contract seeds   │
+│ 2. How to keep it alive        │          │      the cases                                │
+│    & trustworthy               │          │   2. How to keep it alive → production refills │
+│                                │          │      it · names every failure                 │
+│                                │          │   (judge with no golden answer → hard checks  │
+│                                │          │    + a judge · Slide 2)                       │
+└────────────────────────────────┘          └──────────────────────────────────────────────┘
 ```
 
 **Por que é a chave de ouro:** rima visual (mesma caixa, mesmo canto) → o público *sente* o caso
@@ -1124,22 +1151,22 @@ fecha) espelha o **conteúdo** (o flywheel). Fecha tudo o que o Caso 1 abriu —
 3. **Arco do reabastecimento** (prod → traces → AutoRaters → novos cases → set): "mata o rot".
 4. **Zoom — um failure (Spike B):** output parece ok → a **trajetória** pega a tool errada → **Failure Clusters** nomeia e conta ("Incorrect Tool Selection ×37"). O beat herói.
 5. **[DEMO parte 2]** — troca o modelo → Cloud Build roda o eval → score cai → build falha → abre o case → trajetória → cluster nomeia → Cloud Monitoring drift → o set cresceu (injeção do Caso 3). "Minutes, not three days."
-6. **Prova na escala** — "não é whiteboard; rodamos em [ordem de grandeza] agentes no Google."
+6. **Prova qualitativa** — "não é whiteboard; roda em produção no Google" (SEM número — decisão 2026-07-07: não citar escala/quantidade do Google; a credibilidade é *"roda de verdade"*, não a contagem).
 7. **Limite honesto** (desacelera) — EDD checa conformidade, não correção; *por isso* o flywheel (produção corrige a spec). As duas metades se precisam.
 8. **A CHAVE DE OURO** — o anel: a caixa do Slide 1 volta e vira; as 2 perguntas ✓; "green earned"; + *"an attack today becomes a test forever"* (ponte pro Caso 3).
 9. *(gancho, 1 frase)* fecha o Caso 1 → abre o Caso 2.
 
-**Speaker notes** *(~3:30–4:00 · o fecho do caso âncora · inglês simples)*
-- **[0 · transição do Slide 3]** "Cold start is solved — the contract seeds the cases. But cases rot: the contract can be wrong, the world changes, new attacks appear. So the seed is only half. Production is the other half."
-- **[1 · seed arc — rápido]** "Here is the whole loop. The green arc you already know — the contract derives the cases, the cases become the eval set. That is the seed. It kills the cold start."
-- **[2 · gate]** "The eval set feeds a gate. Cloud Build runs the eval on every change. Green, it ships. A regression, the build fails, the deploy is blocked. Note — this gate is not a native button; you build it with Cloud Build."
-- **[3 · refill arc]** "Now the second arc. The agent runs in production. The OpenTelemetry spans from Slide 2 capture every trace. Surprises and failures become new cases, and flow back into the eval set. Production keeps refilling the set — so it stops rotting."
-- **[4 · the why — Spike B, point at the zoom]** "But a score alone is useless. Look at one failure. The output says 'Refund processed' — it looks fine. That is exactly the eight-percent disaster we opened with: right-looking output. But the trajectory — captured by the substrate — shows it skipped the customer lookup. The output hid it; the trajectory caught it. And we do not stop at one — automatic loss analysis groups the failures and names the pattern: 'Incorrect Tool Selection', thirty-seven times. Not just THAT it failed. WHY, and how often."
-- **[5 · DEMO part 2]** "Let's watch it catch the disaster. I swap the model, like that Thursday. Cloud Build runs the eval — the score drops, the build fails, deploy blocked. Minutes, not three days. I open the failing case — the trajectory shows the wrong tool. Failure Clusters names it. And here — a new attack case that production added on its own. The set grew while we watched."
-- **[6 · scale]** "And this is not a whiteboard drawing. We built it, and ran it across [ORDER OF MAGNITUDE — your real number] agents at Google. The eval regenerates from the contract on every change, instead of rotting."
-- **[7 · honest limit — slow down]** "One honest limit. EDD checks that the agent follows the contract. It does *not* check that the contract is correct — same as TDD and BDD; they test against the spec, never the spec itself. That is exactly why the flywheel matters: production shows you where the contract was wrong, and that becomes a new case. The two halves need each other. Alone, EDD is not an oracle — and I will not sell it as one."
-- **[8 · the golden key — ring back, LAND IT]** "So — remember how this case opened? A green score that lied, and two questions. Can we judge with no golden answer? Yes — hard checks where we can, a judge for the rest. Where do the cases come from, and how do we keep them alive? The contract seeds them; production refills them; and every failure gets a name. Both questions — answered." *(beat, point at the flipped box)* "The green score is not a lie anymore. It is *earned*." *(beat)* "And the part I like most — in this loop, an attack today becomes a test forever. The attack Case 3 will block comes back here, as a test that never sleeps. The system gets harder to break every day."
-- **[9 · hook to Case 2]** "That closes Case 1 — quality you can trust *before* you ship. But everything here is pre-production. Under real load, the dependencies stop cooperating. That is Case 2."
+**Speaker notes** *(refeitas 2026-07-07 · ~3:30–4:00 · o fecho do caso âncora · inglês simples · 8 reveals + demo)*
+- **[0 · transição do Slide 3]** "Cold start is solved — the contract seeds the cases. But cases *rot*: the contract can be wrong, the world moves, new attacks appear. The seed is only half. Production is the other half. Here is the whole loop."
+- **[1 · arco da semente — RÁPIDO]** "The green arc you already know from the last slide. The contract derives the cases; the cases become the eval set. That is the seed — it kills the cold start. Move fast here; you have seen it."
+- **[2 · o gate]** "The eval set feeds a gate. Cloud Build runs the eval on *every* change. Green — it ships. A regression — the build fails, the deploy is blocked. One honest note: this gate is not a native button. You build it, with Cloud Build."
+- **[3 · arco de reabastecimento]** "Now the second arc — the one that keeps it alive. The agent runs in production. The OpenTelemetry spans from Slide 2 capture every trace. AutoRaters score them — no golden answer, the same reference-free checks from Slide 2. Surprises and failures flow back as new cases. Production keeps *refilling* the set — so it stops rotting."
+- **[4 · o PORQUÊ — depth spike B · aponte o zoom]** "But a score alone is useless — it tells you *that* something failed, not *why*. So look inside one failing case. The output says 'Refund processed.' It looks fine — this is exactly the eight-percent disaster we opened with. But the *trajectory* — captured by the substrate — shows it never looked the customer up, and refunded anyway. The output hid it; the trajectory caught it. And we do not stop at one case: automatic loss analysis groups the failures and *names* the pattern — 'Incorrect Tool Selection', thirty-seven times. Not just *that* it failed. *Why*, and how often — a prompt, a tool, a data problem the team can actually fix."
+- **[5 · DEMO parte 2]** "Let me show it catch the disaster. I swap the model, like that Thursday. Cloud Build runs the eval — the score drops, the build fails, the deploy is blocked. *Minutes, not three days.* I open the failing case — the trajectory shows the wrong tool; Failure Clusters names it. And here — a new attack case that production added on its own. The set grew while we watched. This is a recorded run — every step is a real component, staged so it fits in a minute."
+- **[6 · prova qualitativa]** "And this is not a whiteboard drawing. I can't share the numbers, but this runs in production at Google — the eval *regenerates* from the contract on every change, instead of being hand-maintained until it rots." *(decisão 2026-07-07: qualitativo apenas, ZERO número/escala do Google. "I can't share the numbers" dito com naturalidade = credibilidade, não fraqueza; o "runs in production" é a prova. A demo (reveal 5) carrega a prova concreta.)*
+- **[7 · limite honesto — DESACELERE]** "One honest limit. EDD checks that the agent follows the contract. It does *not* check that the contract is *correct* — same as TDD and BDD; they test against the spec, never the spec itself. That is exactly why the flywheel matters: production shows you where the contract was wrong, and that becomes a new case. The two halves need each other. Alone, EDD is not an oracle — and I will not sell it as one."
+- **[8 · a chave de ouro — o anel · LAND IT]** "So — remember how this case opened? A green score that lied, and two questions. One: how do you *start*, with no data? The contract seeds the cases. Two: how do you keep it *alive* and trustworthy? Production refills it, and every failure gets a name. And the trust question under both — can we judge with no golden answer? Hard checks where we can, a judge for the rest. Both questions — answered." *(beat, aponte a caixa virada)* "The green score is not a lie anymore. It is *earned*." *(beat)* "And the part I like most — in this loop, an attack today becomes a test *forever*. The attack Case 3 will block comes back here, as a test that never sleeps. The system gets harder to break every day."
+- **[9 · gancho pro Caso 2 — 1 frase seca]** "That closes Case 1 — quality you can trust *before* you ship. But everything here is pre-production. Under real load, the dependencies stop cooperating. That is Case 2."
 
 **Defesas de Q&A (obrigatórias — é o L400):**
 - *"Não é só testar contra a spec? E se a spec estiver errada?"* → "EDD valida conformidade com o
@@ -1154,7 +1181,7 @@ fecha) espelha o **conteúdo** (o flywheel). Fecha tudo o que o Caso 1 abriu —
   só no resíduo subjetivo, com meta-eval contra um conjunto-âncora humano." (ponte pro §9–§12)
 
 **Delivery/landmines:**
-- Ponha **seu número real em ordem de grandeza** no Reveal 6 (dezenas/centenas). Nunca invente precisão.
+- Reveal 6 = **qualitativo, SEM número** (decisão 2026-07-07): "roda em produção no Google / I can't share the numbers". Não citar escala/quantidade do Google. A prova concreta é a **demo** (5).
 - O flywheel (1–3) é **rápido** (forma familiar); o peso vai pro **Failure Clusters** (4), pra **demo**
   (5) e pro **fecho** (7–8). Se o tempo apertar, o corte é encurtar 1–3, **nunca** o anel (8).
 - **A caixa do Slide 1 tem que voltar na MESMA posição** (topo-direita) no Reveal 8 — a rima visual
@@ -1223,7 +1250,7 @@ fails (cluster nomeado + contagem) · dashboard **Cloud Monitoring** com SLI + d
 
 #### Números (placeholders — o usuário preenche; nunca inventar precisão)
 - `[X]%` = score baseline; `[X−8]%` = após o swap. O **8% e os 3 dias** são da CENA (a história) — ficam.
-- `[ORDER OF MAGNITUDE]` = escala de agentes no Google (Slide 4, Reveal 6) — dezenas/centenas.
+- Escala do Google (Slide 4, Reveal 6): **NÃO citar número** (decisão 2026-07-07). Reveal 6 é qualitativo: "roda em produção no Google / I can't share the numbers". A prova concreta é a demo.
 - `×N` do cluster (Slide 4, Reveal 4) — ilustrativo.
 
 #### O que NÃO fazer
