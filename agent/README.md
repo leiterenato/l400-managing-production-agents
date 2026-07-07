@@ -48,6 +48,7 @@ evals/                        # Case 1 eval harness (the six surfaces)
   run_offline.py              # the gate: record → evaluate → report → clusters
 deploy/opentelemetry.env      # OTel env for `adk web --otel_to_cloud`
 deploy/cloudbuild.yaml        # the merge gate (Cloud Build runs the eval)
+deploy/agent_engine.py        # OPTIONAL: deploy to Agent Runtime (managed prod)
 scripts/run_local.py          # drive tool + invariant seam offline (no model)
 tests/                        # pytest — the portable core
 ```
@@ -86,7 +87,17 @@ USE_A2A_FRAUD=true uv run adk web                       # terminal 2
 
 # 6) The real Evaluation Service pipeline (Preview; needs GCP + confirm):
 EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
+
+# 7) OPTIONAL: deploy to Agent Runtime (managed production; do NOT demo live):
+GOOGLE_CLOUD_STAGING_BUCKET=gs://your-bucket \
+  DEPLOY_CONFIRM=1 uv run python deploy/agent_engine.py
 ```
+
+> **Agent Runtime placement.** It's the managed host + the honest home of
+> "production" for the S4 flywheel (Online Monitors sample its live traces). Its
+> observability is the *same* OTel → Cloud Trace/Monitoring/Logging you already
+> use — it does **not** give eval/quality or cost metrics "for free". Keep it in
+> the intro/substrate framing, not as a Case 1 beat. See `deploy/agent_engine.py`.
 
 ### The six eval surfaces (demos/case-1-demos.md) → code
 
