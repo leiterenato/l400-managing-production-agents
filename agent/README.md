@@ -1,0 +1,147 @@
+# Financial Support Agent — L400 reference build
+
+The base agent for **"Managing Production Agents at Scale"**. One agent
+(reads PII + issues refunds) that *matures* across the three cases. This repo is
+the **Case 1** build — Continuous Evaluation & EDD — structured so Cases 2
+(resilience) and 3 (zero-trust) plug in without a rewrite.
+
+Everything runs on **mocks with deterministic feature flags**, so a click always
+produces the same trace. Honest about what is mock; the discipline (the contract
+invariants) is real and portable.
+
+---
+
+## What's here
+
+```
+financial_support/            # the ADK agent package (exposes root_agent)
+  agent.py                    # root orchestrator (wires sub-agents + callbacks)
+  contract.py                 # ★ behavioural contract + invariants (EDD source)
+  prompts.py                  # instructions (happy-path only — correctness ≠ prompt)
+  config.py                   # all env-driven settings in one place
+  sub_agents/                 # refund_specialist, disputes_specialist
+  tools/                      # look_up_customer, issue_refund, fraud_check, open_dispute
+  backends/                   # mock external systems (swappable)
+    customer_db.py            #   ↳ BigQuery (Case 3 adds RLS here)
+    payment_processor.py      #   ↳ payments API (Case 2 hangs resilience here)
+    fraud_service.py          #   ↳ shared fraud logic (also used by the A2A agent)
+    faults.py                 # ★ deterministic fault injection ("feature flags")
+    data.py                   # seed fixtures (TXN-1001 = $50)
+  callbacks/                  # cross-cutting concerns, composed via a registry
+    invariants.py             # ★ the seam: after_tool_callback runs the invariant
+    telemetry.py              # OTel span enrichment
+    registry.py               # ★ compose bundles per concern (extensibility spine)
+  observability/otel.py       # OTel substrate (always on)
+
+fraud_check_a2a/              # external fraud agent, served over A2A
+evals/                        # Case 1 eval harness
+  metrics.py                  # CodeExecutionMetric (green) + LLMMetric (amber)
+  scenarios.py                # seed eval cases + staged trace fixtures
+  run_offline.py              # dry-run (offline) or --live (Evaluation Service)
+deploy/opentelemetry.env      # OTel env for `adk web --otel_to_cloud`
+deploy/cloudbuild.yaml        # the merge gate (Cloud Build runs the eval)
+scripts/run_local.py          # drive tool + invariant seam offline (no model)
+tests/                        # pytest — the portable core
+```
+
+★ = the load-bearing pieces of the Case 1 story.
+
+---
+
+## Quickstart
+
+```bash
+# from the agent/ directory. uv manages the venv + Python 3.12.
+uv sync
+
+# 1) Offline — see the invariant seam catch the money bug (no GCP, no model):
+uv run python -m scripts.run_local refund_over_charge   # $500 refund on $50 → FAIL
+uv run python -m scripts.run_local wrong_account        # cross-account read → FAIL
+uv run python -m scripts.run_local healthy              # clean → PASS
+
+# 2) The eval / merge gate (offline, deterministic; non-zero exit on failure):
+uv run python -m evals.run_offline --dry-run
+
+# 3) Tests:
+uv run pytest -q
+
+# 4) Full agent with the model (needs GCP creds + a .env):
+cp .env.example .env    # fill in GOOGLE_CLOUD_PROJECT etc.
+uv run --env-file deploy/opentelemetry.env adk web --otel_to_cloud
+
+# 5) With the external fraud agent over A2A (two terminals):
+uv run python -m fraud_check_a2a                        # terminal 1 (port 8001)
+USE_A2A_FRAUD=true uv run adk web                       # terminal 2
+```
+
+---
+
+## The idea that ties it together: one invariant, many surfaces
+
+`refund ≤ charge` is **one function**, derived from the contract (that's EDD),
+consumed in three places from a single definition in `contract.py`:
+
+| Job | Where | Code |
+|---|---|---|
+| Runtime guard | `after_tool_callback` on `issue_refund` | `callbacks/invariants.py` |
+| Test / eval metric | `CodeExecutionMetric` (green) | `evals/metrics.py` |
+| Merge gate | Cloud Build runs the eval on the PR | `deploy/cloudbuild.yaml` |
+
+The **LLM judge (amber)** grades tone and would happily pass a $500 refund on a
+$50 charge. The **hard invariant (green)** is what catches it. That is "the green
+score lies", with real money.
+
+### Demo scenarios (set `SCENARIO=` or pass to `run_local`)
+
+| Scenario | What it stages | Bridges to |
+|---|---|---|
+| `healthy` | everything nominal | — |
+| `refund_over_charge` | $500 refund on a $50 charge | **Case 1 wow** |
+| `wrong_account` | `look_up_customer` returns another customer | Case 3 (RLS) |
+| `slow_payment` | 15s payment latency | Case 2 (resilience) |
+| `payment_declined` | payments API hard-fails | Case 2 |
+| `fraud_unavailable` | A2A fraud service down | Case 2 (fallback) |
+
+---
+
+## Extensibility — how Cases 2 & 3 plug in
+
+The structure is deliberately additive. Nothing below requires touching existing
+tool code.
+
+- **New failure modes** → add a scenario (and any new knobs) in
+  `backends/faults.py`. Tools already honour `ToolFault`; unknown knobs are
+  ignored, so new knobs don't break old tools.
+- **New cross-cutting behaviour** (Case 2 circuit breaker / cost-per-span; Case 3
+  identity / authz) → register a `CallbackBundle` in `callbacks/registry.py`:
+
+  ```python
+  register(CallbackBundle(
+      name="resilience",
+      before_tool=[circuit_breaker],   # Case 2
+      after_tool=[record_cost_and_tokens],
+  ))
+  ```
+
+  The new callbacks join the chain automatically — every agent picks them up via
+  `assemble()`.
+- **New specialists** → drop an agent in `sub_agents/` and add it to
+  `build_root_agent`'s `sub_agents` list.
+- **Real backends** → swap the mock modules in `backends/` (same function
+  signatures). Case 3 replaces `customer_db.read_customer` with a BigQuery read
+  scoped by the caller's identity (Row-Level Security).
+
+---
+
+## Honest disclaimers (say these on stage)
+
+- The whole **Eval suite is Preview**; credibility rests on the **GA substrate**
+  (OTel, Cloud Trace, Cloud Build, BigQuery) and on the invariants being
+  **portable** (they run as plain `pytest`).
+- The **CI/CD gate is not native** — Cloud Build runs the eval and fails the
+  build. Quality Alerts only *notify*.
+- **Cost is not captured** by observability; token counts are aggregated.
+  Cost-per-span is your own instrumentation (Case 2).
+- **EDD ≠ user simulation.** The platform's `generate_conversation_scenarios`
+  produces *inputs*; the *criterion of correct* comes from the contract. Naming
+  that boundary is the whole differentiation.

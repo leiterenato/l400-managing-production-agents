@@ -1,0 +1,24 @@
+# Merge gate for Case 1 (the honest version).
+#
+# There is NO native "eval gate" in the platform. What blocks the merge is THIS
+# Cloud Build step running the eval and failing the build when an invariant
+# regresses. Quality Alerts (Cloud Monitoring) only *notify*; they do not gate.
+#
+#   gcloud builds submit --config deploy/cloudbuild.yaml
+#
+# Wire it as a required check on the PR branch to make it a true gate.
+
+steps:
+  - id: eval-gate
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install uv
+        uv sync --frozen
+        # Non-zero exit if any contract invariant fails -> red build -> merge blocked.
+        uv run python -m evals.run_offline --dry-run
+
+options:
+  logging: CLOUD_LOGGING_ONLY
