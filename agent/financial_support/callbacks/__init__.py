@@ -6,6 +6,18 @@
   register their own bundles here).
 """
 
-from .registry import CallbackBundle, assemble, register, registered_concerns
+from .registry import (
+    CallbackBundle,
+    active_bundles,
+    assemble,
+    register,
+    registered_concerns,
+)
 
-__all__ = ["CallbackBundle", "assemble", "register", "registered_concerns"]
+__all__ = [
+    "CallbackBundle",
+    "active_bundles",
+    "assemble",
+    "register",
+    "registered_concerns",
+]

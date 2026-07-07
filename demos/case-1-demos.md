@@ -369,33 +369,45 @@ pico, não no detalhe.
 
 ---
 
-## 8. Próximo passo — build do agente (aguardando "pode iniciar")
+## 8. Build do agente — CONSTRUÍDO (2026-07-07)
 
-Construir o agente **exatamente como nos slides** (Slide 1), para o eval acima ter
-onde reprovar:
+O agente + o harness de eval do Caso 1 estão construídos na pasta **`agent/`** do
+repo (ADK 2.3.0, uv, Python 3.12). Roda offline (sem modelo/GCP) para testes e
+demo; APIs Preview reais wired e guardadas para rodar contra o projeto real.
 
-- **ADK:** `root` (orquestrador) → `refund specialist` + `disputes specialist`.
-- **Tools (mock realista + feature flags de sucesso/falha):**
-  - `look_up_customer` → BigQuery (hook de RLS/identidade no Caso 3).
-  - `issue_refund` → Payment processor (hook de dependência lenta/retry no Caso 2;
-    é onde mora o `after_tool_callback` do invariante).
-  - `fraud_check` → via **A2A** (agente externo).
-- **Feature flags nas tools:** indicam o retorno (sucesso, falha, refund > charge,
-  latência etc.) — permitem encenar o caso que reprova sem lógica não-determinística.
-- **OTel** = substrato sempre on (`adk web --otel_to_cloud`).
-- **Mock, mas muito próximo da realidade.** Honesto sobre o que é mock.
+- **ADK:** `root` (`financial_support`) → `refund_specialist` + `disputes_specialist`.
+- **Tools (mock realista + feature flags):** `look_up_customer` → customer_db
+  (BigQuery; hook RLS no C3), `issue_refund` → payment_processor (hook latência/
+  retry no C2; é onde mora o `after_tool_callback` do invariante), `fraud_check`
+  → local **ou via A2A** (`fraud_check_a2a`, server `to_a2a` + `RemoteA2aAgent`).
+- **Fault engine** (`backends/faults.py`) = as feature flags (cenários
+  `healthy`/`refund_over_charge`/`wrong_account`/`slow_payment`/`payment_declined`/
+  `fraud_unavailable`); encena o caso que reprova sem não-determinismo.
+- **Invariant seam:** `callbacks/invariants.py` (`after_tool_callback`) roda o
+  invariante do `contract.py` + anota o span; modo `observe` (deixa passar → eval
+  pega) vs `block`.
+- **Case-scoping via `CASE`** (registry): a demo do Caso 1 roda com só o
+  invariante ligado; C2/C3 ficam dormentes no mesmo codebase.
 
-**Estrutura de projeto (proposta, a confirmar no build):**
+**Estrutura real construída:**
 ```
-agent/            # ADK: root + specialists + tools (mock + feature flags)
-  contract.py     # o contrato → de onde o EDD deriva os invariantes
-  callbacks.py    # after_tool_callback: emite span + checa invariante
-evals/
-  metrics.py      # CodeExecutionMetric (invariante) + LLMMetric (juiz)
-  run_offline.py  # generate_scenarios → run_inference → evaluate
-opentelemetry.env
-cloudbuild.yaml   # gate: roda o eval no PR
+agent/
+  financial_support/   # ADK: root + sub_agents/ + tools/ + backends/ + callbacks/ + observability/
+    contract.py        # contrato → invariantes (verde); "one function, three jobs"
+    backends/faults.py # feature flags / fault injection
+    callbacks/         # invariants.py (seam) + telemetry.py + registry.py (extensível C2/C3)
+  fraud_check_a2a/     # agente externo via A2A (server + client)
+  evals/               # metrics · scenarios · record · eval_core · report · clusters
+                       # · online_monitor · bigquery_scale · queries/*.sql · live · run_offline
+  deploy/opentelemetry.env · cloudbuild.yaml   # substrato + gate (Cloud Build, não nativo)
+  scripts/run_local.py # dirige tool+seam offline (sem modelo)
+  tests/               # 23 testes verdes
 ```
+
+**Mapa demo → código (as 6 superfícies):** ver tabela no `agent/README.md`.
+Comando-chave da demo offline: `uv run python -m evals.run_offline` (record →
+evaluate → report → clusters → gate exit≠0). O "wow": `refund_over_charge` →
+`refund_within_charge` VERMELHO enquanto `tone_check` fica âmbar verde.
 
 ---
 

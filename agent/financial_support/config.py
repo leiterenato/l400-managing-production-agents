@@ -49,6 +49,12 @@ class Settings:
     # bundle of fault flags so the demo is deterministic and repeatable.
     scenario: str
 
+    # Active case (1-3). The callback registry only activates concerns whose
+    # case <= this, so the Case 1 demo runs with ONLY the invariant seam on —
+    # no Case 2 resilience middleware, no Case 3 identity middleware. One
+    # codebase; a clean, scoped runtime per case. See callbacks/registry.py.
+    case: int
+
     # --- Observability (substrate, always-on by default) -----------------
     telemetry_enabled: bool
     otel_to_cloud: bool
@@ -73,6 +79,7 @@ class Settings:
             location=_env_str("GOOGLE_CLOUD_LOCATION", "us-central1"),
             use_vertex=_env_bool("GOOGLE_GENAI_USE_VERTEXAI", True),
             scenario=_env_str("SCENARIO", "healthy"),
+            case=int(_env_str("CASE", "1")),
             telemetry_enabled=_env_bool("TELEMETRY_ENABLED", True),
             otel_to_cloud=_env_bool("OTEL_TO_CLOUD", False),
             invariant_enforcement=_env_str("INVARIANT_ENFORCEMENT", "observe"),

@@ -18,7 +18,7 @@ steps:
         pip install uv
         uv sync --frozen
         # Non-zero exit if any contract invariant fails -> red build -> merge blocked.
-        uv run python -m evals.run_offline --dry-run
+        uv run python -m evals.run_offline
 
 options:
   logging: CLOUD_LOGGING_ONLY

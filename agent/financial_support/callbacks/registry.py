@@ -24,9 +24,16 @@ from .invariants import enforce_invariants
 
 @dataclass
 class CallbackBundle:
-    """A named group of ADK callbacks contributed by one concern."""
+    """A named group of ADK callbacks contributed by one concern.
+
+    ``case`` is the case this concern belongs to (1 = evaluation/invariants,
+    2 = resilience, 3 = zero-trust). :func:`assemble` only activates bundles
+    whose ``case`` is <= the active ``CASE`` setting, so the Case 1 demo runs
+    lean while the code for later cases stays dormant in the same codebase.
+    """
 
     name: str
+    case: int = 1
     before_agent: list[Callable] = field(default_factory=list)
     after_agent: list[Callable] = field(default_factory=list)
     before_model: list[Callable] = field(default_factory=list)
@@ -46,8 +53,20 @@ def registered_concerns() -> list[str]:
     return [b.name for b in _REGISTRY]
 
 
+def active_bundles() -> list[CallbackBundle]:
+    """Bundles whose case is <= the active CASE setting."""
+
+    from ..config import get_settings
+
+    active_case = get_settings().case
+    return [b for b in _REGISTRY if b.case <= active_case]
+
+
 def assemble() -> dict[str, list[Callable]]:
-    """Return non-empty ADK callback kwargs, e.g. ``{"after_tool_callback": [...]}``."""
+    """Return non-empty ADK callback kwargs, e.g. ``{"after_tool_callback": [...]}``.
+
+    Only concerns for the active case (and earlier) are wired.
+    """
 
     fields = [
         "before_agent",
@@ -57,13 +76,22 @@ def assemble() -> dict[str, list[Callable]]:
         "before_tool",
         "after_tool",
     ]
+    bundles = active_bundles()
     out: dict[str, list[Callable]] = {}
     for f in fields:
-        combined = [cb for b in _REGISTRY for cb in getattr(b, f)]
+        combined = [cb for b in bundles for cb in getattr(b, f)]
         if combined:
             out[f"{f}_callback"] = combined
     return out
 
 
 # --- Built-in concern: Case 1 invariants ---------------------------------
-register(CallbackBundle(name="invariants", after_tool=[enforce_invariants]))
+register(CallbackBundle(name="invariants", case=1, after_tool=[enforce_invariants]))
+
+# Case 2 (resilience) and Case 3 (zero-trust) register their bundles here when
+# those cases are built, e.g.:
+#   register(CallbackBundle(name="resilience", case=2,
+#                           before_tool=[circuit_breaker], after_tool=[record_cost]))
+#   register(CallbackBundle(name="identity", case=3,
+#                           before_tool=[enforce_identity]))
+# With CASE=1 they stay dormant; the Case 1 demo shows only the invariant seam.

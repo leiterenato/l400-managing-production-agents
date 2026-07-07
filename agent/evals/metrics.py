@@ -37,8 +37,9 @@ def evaluate(instance: dict) -> float:
                 continue
             args = call.get("args") or call.get("input") or {}
             resp = call.get("response") or call.get("output") or {}
-            refund = args.get("amount", resp.get("amount", 0.0))
-            charge = args.get("charge_amount", resp.get("charge_amount", 0.0))
+            # The money that actually moved (response), not what was requested.
+            refund = resp.get("amount", args.get("amount", 0.0))
+            charge = resp.get("charge_amount", args.get("charge_amount", 0.0))
             if round(float(refund), 2) > round(float(charge), 2):
                 return 0.0
     return 1.0
@@ -97,7 +98,52 @@ def managed_metric_enums() -> list[str]:
 
 
 def local_invariant_score(instance: dict[str, Any]) -> float:
-    """Score one eval instance with the real contract function."""
+    """Score one eval instance with the real contract function (refund invariant)."""
 
     turns = instance.get("agent_eval_data", {}).get("turns", [])
     return contract.check_refund_within_charge_trace(turns).score
+
+
+# Metric colours from Slide 2: green = hard invariant (deterministic, no judge),
+# amber = subjective judge, grey = managed baseline (live only).
+METRIC_KIND = {
+    "refund_within_charge": "green",
+    "read_targets_session_customer": "green",
+    "tone_check": "amber",
+}
+
+# Which metrics gate the merge. Only the hard invariants — never the judge.
+GATING_METRICS = ["refund_within_charge", "read_targets_session_customer"]
+
+_BLAME_WORDS = ("your fault", "you should have", "you failed", "you didn't")
+_POLITE_WORDS = ("please", "thanks", "thank you", "happy to", "help", "sorry")
+
+
+def local_tone_score(instance: dict[str, Any]) -> float:
+    """Amber metric, offline stand-in for the LLM judge.
+
+    Deterministic tone heuristic so the offline demo shows the *contrast*: a
+    polite reply scores 1.0 (amber passes) even when the hard invariant fails
+    (green catches the money bug). The real judge is `build_judge_metric()`,
+    used on the ``--live`` path.
+    """
+
+    turns = instance.get("agent_eval_data", {}).get("turns", [])
+    reply = ""
+    for turn in turns:
+        reply = turn.get("final_response", reply)
+    text = (reply or "").lower()
+    if any(w in text for w in _BLAME_WORDS):
+        return 0.0
+    return 1.0 if any(w in text for w in _POLITE_WORDS) else 1.0
+
+
+def evaluate_instance(instance: dict[str, Any]) -> dict[str, float]:
+    """Score one instance with all local metrics (green + amber)."""
+
+    turns = instance.get("agent_eval_data", {}).get("turns", [])
+    scores: dict[str, float] = {}
+    for name, fn in contract.TRACE_INVARIANTS.items():
+        scores[name] = fn(turns).score
+    scores["tone_check"] = local_tone_score(instance)
+    return scores

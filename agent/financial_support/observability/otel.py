@@ -16,6 +16,8 @@ real tracer provider is already installed, it does nothing.
 
 from __future__ import annotations
 
+import os
+
 from ..config import get_settings
 
 _initialised = False
@@ -54,4 +56,20 @@ def init_telemetry() -> None:
         return
 
     resource = Resource.create({"service.name": "financial-support-agent"})
-    trace.set_tracer_provider(TracerProvider(resource=resource))
+    provider = TracerProvider(resource=resource)
+
+    # Optional: print spans (with the eval.invariant.* attributes) to the console
+    # for local dev — set OTEL_CONSOLE=true. Cloud export is handled by ADK's
+    # `--otel_to_cloud` in the real demo.
+    if os.environ.get("OTEL_CONSOLE", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from opentelemetry.sdk.trace.export import (
+                BatchSpanProcessor,
+                ConsoleSpanExporter,
+            )
+
+            provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        except Exception:
+            pass
+
+    trace.set_tracer_provider(provider)

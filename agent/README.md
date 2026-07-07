@@ -34,10 +34,18 @@ financial_support/            # the ADK agent package (exposes root_agent)
   observability/otel.py       # OTel substrate (always on)
 
 fraud_check_a2a/              # external fraud agent, served over A2A
-evals/                        # Case 1 eval harness
-  metrics.py                  # CodeExecutionMetric (green) + LLMMetric (amber)
-  scenarios.py                # seed eval cases + staged trace fixtures
-  run_offline.py              # dry-run (offline) or --live (Evaluation Service)
+evals/                        # Case 1 eval harness (the six surfaces)
+  metrics.py                  # green CodeExecutionMetric + amber LLMMetric + local judge
+  scenarios.py                # seed eval cases (EDD) + staged fixtures
+  record.py                   # record traces (agent → dataset), offline-deterministic
+  eval_core.py                # score a dataset → EvalResult + gate
+  report.py                   # console report
+  clusters.py                 # failure clustering (generate_loss_clusters analogue)
+  online_monitor.py           # S4 sentinel: rolling invariant + alert (simulated)
+  bigquery_scale.py           # S4 floor: weekly failure rate over months
+  queries/invariant_trend.sql #   the real BigQuery trend query
+  live.py                     # the real Evaluation Service pipeline (guarded)
+  run_offline.py              # the gate: record → evaluate → report → clusters
 deploy/opentelemetry.env      # OTel env for `adk web --otel_to_cloud`
 deploy/cloudbuild.yaml        # the merge gate (Cloud Build runs the eval)
 scripts/run_local.py          # drive tool + invariant seam offline (no model)
@@ -60,7 +68,10 @@ uv run python -m scripts.run_local wrong_account        # cross-account read →
 uv run python -m scripts.run_local healthy              # clean → PASS
 
 # 2) The eval / merge gate (offline, deterministic; non-zero exit on failure):
-uv run python -m evals.run_offline --dry-run
+uv run python -m evals.run_offline          # record → evaluate → report → clusters
+uv run python -m evals.record               # just show the recorded traces
+uv run python -m evals.online_monitor       # S4: rolling invariant + alert
+uv run python -m evals.bigquery_scale       # S4: weekly failure rate over months
 
 # 3) Tests:
 uv run pytest -q
@@ -72,7 +83,21 @@ uv run --env-file deploy/opentelemetry.env adk web --otel_to_cloud
 # 5) With the external fraud agent over A2A (two terminals):
 uv run python -m fraud_check_a2a                        # terminal 1 (port 8001)
 USE_A2A_FRAUD=true uv run adk web                       # terminal 2
+
+# 6) The real Evaluation Service pipeline (Preview; needs GCP + confirm):
+EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
 ```
+
+### The six eval surfaces (demos/case-1-demos.md) → code
+
+| Surface | Slide | Code |
+|---|---|---|
+| Observability (trace/topology) | S2 | `observability/`, `callbacks/telemetry.py` |
+| Manage metrics (green/amber/grey) | S3 | `evals/metrics.py` |
+| Run offline + simulate + gate | S3 | `evals/record.py`, `eval_core.py`, `run_offline.py` |
+| Failure clusters | S4 | `evals/clusters.py` |
+| Online monitor + alert | S4 | `evals/online_monitor.py` |
+| BigQuery scale floor | S4 | `evals/bigquery_scale.py`, `queries/invariant_trend.sql` |
 
 ---
 
