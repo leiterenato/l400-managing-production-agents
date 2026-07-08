@@ -13,7 +13,7 @@
 4. [O arco em 5 atos](#4-o-arco-em-5-atos)
 5. [Slide 5 — "The Cascade" (problema)](#5-slide-5--the-cascade)
 6. [Slide 6 — "Contain the blast" (clímax)](#6-slide-6--contain-the-blast)
-7. [Slide 7 — governar custo (pendente)](#7-slide-7--governar-custo-pendente)
+7. [Slide 7 — "Govern the cost" (clímax econômico)](#7-slide-7--govern-the-cost)
 8. [Landmines e decisões travadas](#8-landmines-e-decisões-travadas)
 
 ---
@@ -234,13 +234,75 @@ Timing ~2 min (com os 3 beats). Inegociável: **reveal 4** (injeção no context
 
 ---
 
-## 7. Slide 7 — governar custo (pendente)
+## 7. Slide 7 — "Govern the cost"
 
-**Papel:** de sobreviver → governar. **Câmera:** afasta pra árvore de custo. **Cor:** verde/controle. **Ainda NÃO desenvolvido.**
+**Papel:** amadurecimento final — de conter um incidente pra governar a economia. **Câmera:** afasta (uma sessão → a árvore da org). **Cor:** verde/controle (com callout vermelho no "porquê"). **Demo tecida** (leve). **Título:** "Govern the cost" (alt: "Who pays for it?", paga a deixa do Slide 6). **Deep spike:** *one instrumented number, three altitudes of control.*
 
-Conteúdo previsto (Ato 5): cost/token **por span** (sua instrumentação — a plataforma não captura custo, token vem agregado) → **budget por sessão** (contém o blast **localmente**) → **PT vs DSQ** (a alavanca do 429, mas **não** como estrela) + caching + routing (seu código) → **FinOps na árvore** (Billing→BigQuery + labels → custo por user/project/org; visibilidade vira **gestão**). Ponte de saída pro Caso 3.
+### A ideia que faz ser L400 (não "ligue o billing dashboard")
+> A economia do agente é **não-linear**, e a plataforma **não te dá o número** que você precisa pra governá-la. Custo não escala com tráfego — ele *compõe*: fan-out (sub-agentes) × contexto crescendo (cada turno reenvia o histórico) × retries. E a plataforma captura I/O e latência por span, mas **não captura custo**, e token vem **agregado**. Então você instrumenta **custo por span** — e esse número, uma vez que existe, faz **três trabalhos em três altitudes**: sessão (local), time/projeto (médio), org (global).
 
-**Lente travada (§1):** o protagonista é a **economia** (custo não-linear, cost/span, FinOps na árvore) — muito mais L400 e raro de ver bem-feito do que "compre capacidade reservada". PT fica coadjuvante.
+Rima de propósito com o Caso 1 ("um invariante, seis superfícies") e reusa o **mesmo seam** (o callback que emitiu o span, rodou o invariante no C1 e injetou o breaker no S6 — agora acumula custo e aplica o budget). **Um seam, muitos trabalhos** = o fio arquitetural do talk inteiro.
+
+### Arquitetura — o número → três altitudes (a árvore cresce pra cima = câmera afasta)
+```mermaid
+flowchart LR
+  WHY["<b>WHY it's non-linear</b><br/>fan-out × context growth × retries<br/><i>2× traffic → 20× tokens (Slide 5)</i>"]:::why
+
+  SEAM["The seam — same callback<br/><b>cost per span</b><br/><i>you instrument it · platform captures<br/>I/O + latency, NOT cost · token is aggregated</i>"]:::seam
+
+  subgraph TREE["One number · three altitudes of control"]
+    direction TB
+    SESS["<b>SESSION</b> — contain the blast (local)<br/>per-session token / step budget<br/><i>kills one runaway session mid-flight</i>"]:::ctrl
+    PROJ["<b>PROJECT / TEAM</b> — shape spend<br/>cost-aware routing (Flash/Pro) · reserved-capacity sizing<br/><i>routing = your code · reserved capacity = capacity, not the star</i>"]:::ctrl
+    ORG["<b>ORG</b> — govern (global)<br/>Billing → BigQuery + labels<br/>chargeback · alerts · quotas per tenant"]:::ctrl
+    SESS --> PROJ --> ORG
+  end
+
+  WHY -.-> SEAM
+  SEAM ==> SESS
+
+  classDef why fill:#fce8e6,stroke:#d93025,color:#111
+  classDef seam fill:#e8f0fe,stroke:#1a73e8,stroke-width:3px,color:#111
+  classDef ctrl fill:#e6f4ea,stroke:#188038,color:#111
+```
+**Herói visual:** a coluna `SEAM → SESSION → PROJECT → ORG` — um número instrumentado subindo a árvore. Distinção afiada: **budget por sessão = contenção local** (mata *uma* sessão descontrolada, o espírito do breaker); **FinOps na org = governança global** (atribui e cobra por tenant). Visibilidade de custo ≠ gestão de custo.
+
+**Notas de build:**
+- **A árvore cresce pra CIMA** (sessão embaixo → org em cima). Câmera afastando = altitude subindo (reforça o "zoom out" do arco).
+- **Cor = significado (consistente com S6):** vermelho = a ferida (economia não-linear); **azul = sua instrumentação** (o seam/cost-per-span, mesma cor da injeção do S6); verde = os controles/governança.
+- **O seam é o MESMO elemento visual** do C1 (span + invariante) e do S6 (injeta breaker) — mostre-o recorrente ("um seam, muitos trabalhos"). Continuidade barata e poderosa.
+- **Reserved capacity (Provisioned Throughput) fica como sub-item pequeno** do tier PROJECT, tag "*capacity, not the star*" — sem destaque de depth spike.
+- **A coluna é UMA linha vertical limpa** (seam → 3 tiers), sem ramificações laterais (evita o embolamento do S5).
+
+**Reveals (7 + demo leve tecida):**
+1. **O porquê (vermelho)** — custo é não-linear: fan-out × contexto × retries. *"O 2×→20× do Slide 5 não foi azar."*
+2. **Beat de honestidade + o enabler (azul)** — cost per span. A plataforma dá I/O e latência, **não** custo; token agregado → você instrumenta, no **mesmo seam** do C1/S6. **[DEMO: abre a trace, mostra o atributo de custo por span — o número que a plataforma não deu]**
+3. **Altitude 1 — SESSION** — budget por sessão, contém *uma* sessão descontrolada, localmente.
+4. **Altitude 2 — PROJECT/TEAM** — modela gasto: routing cost-aware (seu código, não há router gerenciado) + reserved-capacity (Provisioned Throughput) sizing (1 frase).
+5. **Altitude 3 — ORG** — FinOps: Billing→BigQuery + labels → chargeback/alerts/quotas por tenant. **[DEMO: BigQuery — custo por projeto/tenant; um time dispara → alerta]**
+6. **Payoff do deep spike** — *"um número instrumentado, três altitudes: sessão, time, org. A diferença entre receber uma conta assustadora e governar o gasto."*
+7. **Ponte pro Caso 3** — *"resiliente ✓, custo governado ✓ — mas cada chamada mexe com dinheiro e PII. Resiliente ≠ seguro."*
+
+### Speaker notes (EN)
+> *(pick up from Slide 6's last line: "what did this cost — and who pays for it?")*
+> "We survived the incident. Now — what did it cost, and who pays?
+> *(reveal 1 — the why)* First, why cost is even a problem. For a normal service, cost scales with traffic — double the traffic, double the bill. For an agent it compounds: one request fans out into sub-agents and tool calls; every turn re-sends the growing context; and retries multiply all of it. That's why, back in Slide 5, a two-times traffic spike became twenty-times the tokens. It's not bad luck — it's how agent economics behave.
+> *(reveal 2 — honesty beat · demo)* Now here's the catch. To govern cost, you need the cost of each decision. And the platform does not give it to you. It captures inputs, outputs, and latency per step — but not cost, and token counts come aggregated, per session or per model. So you instrument cost per span yourself — on the *same* callback that already emits the trace and runs the invariant from Case 1. One seam, many jobs. *(show the cost attribute in the trace)*
+> *(reveal 3 — session)* Once you have that number, it does three jobs, at three altitudes. First, the session: a per-session token and step budget. This kills one runaway session in flight — the same idea as the breaker, but for spend. Local containment.
+> *(reveal 4 — project)* Second, the team or project: now that you can see which decision is expensive, you route — Flash for the easy calls, Pro for the hard ones. That routing is your code; there is no managed router. And this is where you size reserved capacity — Provisioned Throughput — if you need predictable latency. But capacity is a purchase; the engineering is the policy around it.
+> *(reveal 5 — org · demo)* Third, the org: you tag every call with a label hierarchy — user, project, org — stream it to BigQuery, and now you can attribute and govern. Chargeback per tenant, alerts and quotas per project. *(show cost per tenant; one team spikes, an alert fires.)*
+> *(reveal 6 — payoff)* One instrumented number, three altitudes: session, team, org. That is the difference between getting a scary bill at the end of the month and governing spend as it happens. Visibility is not management.
+> *(reveal 7 — bridge to Case 3)* So now the agent is resilient, and its cost is governed. But look at what we've been moving around this whole time — refunds, balances, customer accounts. Every one of these calls touches money and PII. Resilient is not the same as secure. That's Case 3."
+
+Timing ~2 min (2 beats leves de demo). Inegociáveis: **reveal 2** (custo não é capturado — "liguei tracing" vs "governo gasto") e **reveal 6** (payoff das três altitudes). Se apertar, o tier PROJECT (reveal 4) vira 1 frase.
+
+### Defesas de Q&A (Slide 7)
+- **"A plataforma não dá custo?"** → Dá I/O e latência por span; **custo não**, e token vem agregado (sessão/modelo/agente). Custo por span é instrumentação sua.
+- **"Não é só tag + dashboard no BigQuery?"** → O dashboard é a parte fácil. A disciplina é instrumentar no nível da *decisão*, aplicar budget em *runtime* (local) e atribuir numa *hierarquia de labels* (global) — custo vira loop de controle, não autópsia mensal.
+- **"Por que não só uma quota de projeto?"** → Quota de projeto é teto global cego; não para *uma* sessão descontrolada no meio do voo, nem atribui por tenant. Precisa das duas altitudes.
+- **"Reserved capacity (PT) é obrigatório?"** → Não — é escolha de capacidade pra latência previsível e evitar 429. A engenharia é a política de spillover + budget + backoff, não comprar o SKU.
+
+**Lente travada (§1):** protagonista é a **economia** (custo não-linear, cost/span, FinOps na árvore) — muito mais L400 e raro de ver bem-feito do que "compre capacidade reservada". Reserved capacity (PT) é coadjuvante.
 
 ---
 
