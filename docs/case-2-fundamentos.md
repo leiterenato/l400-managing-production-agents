@@ -243,36 +243,36 @@ Timing ~2 min (com os 3 beats). Inegociável: **reveal 4** (injeção no context
 
 Rima de propósito com o Caso 1 ("um invariante, seis superfícies") e reusa o **mesmo seam** (o callback que emitiu o span, rodou o invariante no C1 e injetou o breaker no S6 — agora acumula custo e aplica o budget). **Um seam, muitos trabalhos** = o fio arquitetural do talk inteiro.
 
-### Arquitetura — o número → três altitudes (a árvore cresce pra cima = câmera afasta)
+### Arquitetura — um número, três escopos (leque paralelo; WHY = banner)
+> **Correção de geometria (2026-07-08):** a v1 desenhava `SESSION → PROJECT → ORG` encadeados (sugeria fluxo/sequência falso — mesmo bug do S5) e `WHY -.-> SEAM` (sugeria que o "porquê" flui pra dentro do seam). O conceito real é **uma fonte → três consumidores PARALELOS**, em escopo crescente. WHY é motivação (banner), não nó de fluxo.
+
 ```mermaid
 flowchart LR
-  WHY["<b>WHY it's non-linear</b><br/>fan-out × context growth × retries<br/><i>2× traffic → 20× tokens (Slide 5)</i>"]:::why
+  WHY["<b>WHY it's non-linear</b> — fan-out × context growth × retries · <i>2× traffic → 20× tokens (Slide 5)</i>"]:::why
 
-  SEAM["The seam — same callback<br/><b>cost per span</b><br/><i>you instrument it · platform captures<br/>I/O + latency, NOT cost · token is aggregated</i>"]:::seam
+  SEAM["<b>cost per span</b><br/>you instrument it<br/><i>platform gives I/O + latency, not cost</i>"]:::seam
 
-  subgraph TREE["One number · three altitudes of control"]
-    direction TB
-    SESS["<b>SESSION</b> — contain the blast (local)<br/>per-session token / step budget<br/><i>kills one runaway session mid-flight</i>"]:::ctrl
-    PROJ["<b>PROJECT / TEAM</b> — shape spend<br/>cost-aware routing (Flash/Pro) · reserved-capacity sizing<br/><i>routing = your code · reserved capacity = capacity, not the star</i>"]:::ctrl
-    ORG["<b>ORG</b> — govern (global)<br/>Billing → BigQuery + labels<br/>chargeback · alerts · quotas per tenant"]:::ctrl
-    SESS --> PROJ --> ORG
-  end
+  ORG["<b>ORG</b> · global<br/>Billing→BigQuery + labels<br/>chargeback · quotas per tenant"]:::ctrl
+  PROJ["<b>PROJECT / TEAM</b> · mid<br/>cost-aware routing (Flash/Pro)<br/>reserved-capacity sizing"]:::ctrl
+  SESS["<b>SESSION</b> · local<br/>per-session budget<br/>kill a runaway session"]:::ctrl
 
-  WHY -.-> SEAM
+  SEAM ==> ORG
+  SEAM ==> PROJ
   SEAM ==> SESS
 
   classDef why fill:#fce8e6,stroke:#d93025,color:#111
   classDef seam fill:#e8f0fe,stroke:#1a73e8,stroke-width:3px,color:#111
   classDef ctrl fill:#e6f4ea,stroke:#188038,color:#111
 ```
-**Herói visual:** a coluna `SEAM → SESSION → PROJECT → ORG` — um número instrumentado subindo a árvore. Distinção afiada: **budget por sessão = contenção local** (mata *uma* sessão descontrolada, o espírito do breaker); **FinOps na org = governança global** (atribui e cobra por tenant). Visibilidade de custo ≠ gestão de custo.
+**Herói visual:** UMA fonte (`cost per span`) → **três lanes paralelas** (session/project/org). Lê na hora como "o mesmo número, três usos". Distinção afiada: **budget por sessão = contenção local** (mata *uma* sessão descontrolada, o espírito do breaker); **FinOps na org = governança global** (atribui e cobra por tenant). Visibilidade de custo ≠ gestão de custo.
 
 **Notas de build:**
-- **A árvore cresce pra CIMA** (sessão embaixo → org em cima). Câmera afastando = altitude subindo (reforça o "zoom out" do arco).
+- **WHY = faixa vermelha no topo, largura cheia, SEM seta** — é o "porquê nos importamos" (reveal 1), depois fica de pano de fundo. Nunca ligar por seta ao seam.
+- **Leque paralelo, não cadeia:** as três lanes saem da mesma fonte; **nenhuma seta entre elas** (session não "vira" project). Ordem = escopo: SESSION embaixo → ORG em cima, com um eixo lateral discreto **"scope: local → global ↑"** (dá a sensação de câmera afastando sem seta causal).
 - **Cor = significado (consistente com S6):** vermelho = a ferida (economia não-linear); **azul = sua instrumentação** (o seam/cost-per-span, mesma cor da injeção do S6); verde = os controles/governança.
 - **O seam é o MESMO elemento visual** do C1 (span + invariante) e do S6 (injeta breaker) — mostre-o recorrente ("um seam, muitos trabalhos"). Continuidade barata e poderosa.
-- **Reserved capacity (Provisioned Throughput) fica como sub-item pequeno** do tier PROJECT, tag "*capacity, not the star*" — sem destaque de depth spike.
-- **A coluna é UMA linha vertical limpa** (seam → 3 tiers), sem ramificações laterais (evita o embolamento do S5).
+- **Reserved capacity (Provisioned Throughput) fica como sub-item pequeno** da lane PROJECT, tag "*capacity, not the star*" — sem destaque de depth spike.
+- **Alternativa premium (build manual):** anéis concêntricos (cost/span no centro → SESSION → PROJECT → ORG) — mostra "mesmo número, escopo se abrindo" e faz callback do *blast radius* do S5/S6. Mais elegante, um tico mais de carga cognitiva. Mermaid não desenha.
 
 **Reveals (7 + demo leve tecida):**
 1. **O porquê (vermelho)** — custo é não-linear: fan-out × contexto × retries. *"O 2×→20× do Slide 5 não foi azar."*
