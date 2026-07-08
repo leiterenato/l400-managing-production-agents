@@ -36,8 +36,10 @@
    Consequência: `.show()` (renderer de notebook) não serve → resultados aparecem na
    **aba Evaluation do Console** (reforça "dentro do Google Cloud").
 3. **Real vs. staged:** S3 (autoria + geração + eval) **roda de verdade**; S4
-   (flywheel: run+fail+clusters+monitor) é **staged de componentes reais** (encenado,
-   mas tudo já preparado/gravado). Só o 403 do Caso 3 é genuinamente ao vivo.
+   (flywheel: run+fail+clusters+monitor) = **formato a DECIDIR** (gravado OU ambiente
+   pré-rodado mostrado ao vivo — decisão 2026-07-08; construir funcional 1º, escolher
+   depois). Componentes reais, tudo já preparado. **Fala neutra até decidir** (nem
+   "ao vivo" nem "gravação"). Só o 403 do Caso 3 é genuinamente ao vivo.
 4. **Preview liberado:** usar **tudo que existe hoje**, mesmo em Preview, com
    **transparência no palco** (dizer o que é GA e o que é Preview).
 5. **BigQuery entra no Caso 1** como a peça de **"escala"** (onde vivem milhões de
@@ -330,13 +332,18 @@ Pergunta viva que atravessa os cortes: *"o placar tá verde. Pode dar deploy?"*
    sobe **VERDE**; métricas managed passam. **Pausa.** *"Ship it? É aqui que a maioria
    dos times para."*
 
-### Corte S4 — "O placar verde mente" — pt.2: o dinheiro *(~2 min, clímax, staged)*
-1. **O reveal:** clica no **único** caso que destoa. `CodeExecutionMetric` **VERMELHO**:
-   o agente reembolsou **$500** numa cobrança de **$50** — e o juiz LLM classificou a
-   resposta como "prestativa e educada". **O placar verde mentiu, ao vivo, com dinheiro.**
-2. **É padrão ou azar?** `generate_loss_clusters(...)` → **Failure Clusters** no
-   Console: **"Incorrect Tool Selection ×N"**. *"Não foi azar. A plataforma deu nome
-   ao padrão."*
+### Corte S4 — "O placar verde mente" — pt.2: o dinheiro *(~2 min, clímax, formato a decidir)*
+1. **O um-dois — A · o barulhento:** clica no caso do dinheiro. `CodeExecutionMetric`
+   `refund ≤ charge` **VERMELHO**: o agente reembolsou **$500** numa cobrança de **$50**
+   — e o juiz de tom classificou como "prestativa e educada" (**verde**). **O placar verde
+   mente — com dinheiro real.** O check duro pega sozinho; o "porquê" é óbvio (refund >
+   charge). *(fala neutra sobre o formato; não afirmar "ao vivo" se for gravação.)*
+2. **O um-dois — B · o silencioso:** agora um caso **todo verde** (valor ok, output ok,
+   todos os scores passam). Só a **trajetória** mostra que ele **pulou o look-up** e
+   reembolsou assim mesmo — invisível pra qualquer check de valor. `generate_loss_clusters(...)`
+   → **Failure Clusters**: **"Incorrect Tool Selection ×N"**. *"O A o check duro pegou; o B,
+   só a trajetória via — e a plataforma deu nome ao padrão."* **É o B que prova por que
+   precisamos de trajetória + clusters.**
 3. **Fecha o loop:** o caso reprovado entra no dataset. *"Um ataque hoje vira um teste
    pra sempre."* A caixa **"The Green Score Lies"** (Slide 1) volta como **"The Green
    Score — EARNED"**, com as 2 perguntas ganhando ✓.
@@ -348,9 +355,9 @@ Pergunta viva que atravessa os cortes: *"o placar tá verde. Pode dar deploy?"*
 6. **(Opcional, gravado):** `adk optimize` (GEPA) propõe a correção das instruções.
    *"O loop pode até tentar se consertar."* — fronteira, não mágica.
 
-**Arco emocional:** verde ingênuo (S3) → mentira revelada com dinheiro (S4) → padrão
-nomeado → loop fechado (anel) → escala provada (BQ) → vigilância contínua. Termina no
-pico, não no detalhe.
+**Arco emocional:** verde ingênuo (S3) → **um-dois** (A: mentira com dinheiro, check duro
+pega · B: falha silenciosa, só a trajetória pega + cluster nomeia) → loop fechado (anel) →
+escala provada (BQ) → vigilância contínua. Termina no pico, não no detalhe.
 
 ---
 
