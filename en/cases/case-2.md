@@ -2,6 +2,7 @@
 *(visual showpiece)*
 
 > Standardized execution doc. Strategic summary in `../blueprint-presentation.md`.
+> **Slide-by-slide narrative, architecture (Mermaid), reveals, speaker notes, and the L400-relevance discussion live in `../../docs/case-2-fundamentos.md`.**
 > Platform: **Gemini Enterprise Agent Platform** → **Scale** pillar (Agent Runtime · Sessions · Memory Bank) + model consumption options (Provisioned Throughput · Context caching).
 >
 > **Observability absorbed here (substrate):** this case owns **two** functions of observability —
