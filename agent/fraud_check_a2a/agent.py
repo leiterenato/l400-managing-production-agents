@@ -10,12 +10,12 @@ and the seed for Case 3's identity-propagation story.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from google.adk.agents import LlmAgent
 
 from financial_support.backends import fraud_service
+from financial_support.model import build_model
 
 
 def assess_fraud(customer_id: str, charge_id: str, amount: float) -> dict[str, Any]:
@@ -42,7 +42,7 @@ review, or deny) and the risk score in one short sentence.
 
 root_agent = LlmAgent(
     name="fraud_check",
-    model=os.environ.get("MODEL", "gemini-2.5-flash"),
+    model=build_model(),
     description="External fraud-check service for proposed refunds.",
     instruction=INSTRUCTION,
     tools=[assess_fraud],

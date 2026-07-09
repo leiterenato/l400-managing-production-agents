@@ -74,7 +74,7 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
-            model=_env_str("MODEL", "gemini-2.5-flash"),
+            model=_env_str("MODEL", "gemini-3.5-flash"),
             project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
             location=_env_str("GOOGLE_CLOUD_LOCATION", "us-central1"),
             use_vertex=_env_bool("GOOGLE_GENAI_USE_VERTEXAI", True),

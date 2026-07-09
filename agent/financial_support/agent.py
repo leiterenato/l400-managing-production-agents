@@ -16,7 +16,7 @@ from __future__ import annotations
 from google.adk.agents import LlmAgent
 
 from .callbacks import assemble
-from .config import get_settings
+from .model import build_model
 from .observability import init_telemetry
 from .prompts import ROOT_INSTRUCTION
 from .sub_agents import build_disputes_agent, build_refund_agent
@@ -24,14 +24,12 @@ from .tools import look_up_customer
 
 
 def build_root_agent() -> LlmAgent:
-    settings = get_settings()
-
     # Bring up telemetry substrate (no-op if disabled / already running).
     init_telemetry()
 
     return LlmAgent(
         name="financial_support",
-        model=settings.model,
+        model=build_model(),
         description="Front door of the financial support team. Routes to the "
         "refund and disputes specialists.",
         instruction=ROOT_INSTRUCTION,

@@ -13,7 +13,7 @@ from google.adk.agents import LlmAgent
 from google.adk.tools.agent_tool import AgentTool
 
 from ..callbacks import assemble
-from ..config import get_settings
+from ..model import build_model
 from ..prompts import REFUND_INSTRUCTION
 from ..tools import build_remote_fraud_agent, fraud_check, issue_refund, look_up_customer
 
@@ -27,10 +27,9 @@ def _fraud_tool():
 
 
 def build_refund_agent() -> LlmAgent:
-    settings = get_settings()
     return LlmAgent(
         name="refund_specialist",
-        model=settings.model,
+        model=build_model(),
         description="Handles refund requests: verifies the charge, runs a fraud "
         "check, and issues the refund.",
         instruction=REFUND_INSTRUCTION,
