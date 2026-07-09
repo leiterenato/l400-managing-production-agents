@@ -54,16 +54,19 @@ def run_live() -> int:
     from .metrics import (
         build_invariant_metric,
         build_judge_metric,
+        build_trajectory_metric,
         managed_metric_enums,
     )
 
     settings = get_settings()
     client = vertexai.Client(project=settings.project, location=settings.location)
 
-    # 1) Register our custom metrics (green invariant + amber judge).
-    invariant = build_invariant_metric()   # types.CodeExecutionMetric
-    judge = build_judge_metric()           # types.LLMMetric
+    # 1) Register our custom metrics (green invariants + amber judge).
+    invariant = build_invariant_metric()     # types.CodeExecutionMetric (value)
+    trajectory = build_trajectory_metric()   # types.CodeExecutionMetric (path, beat B)
+    judge = build_judge_metric()             # types.LLMMetric
     client.evals.create_evaluation_metric(metric=invariant)
+    client.evals.create_evaluation_metric(metric=trajectory)
     client.evals.create_evaluation_metric(metric=judge)
 
     # 2) Platform generates INPUTS (user simulation — NOT the criterion of right).
@@ -90,7 +93,7 @@ def run_live() -> int:
     managed = [getattr(types.RubricMetric, n) for n in managed_metric_enums()]
     result = client.evals.evaluate(
         dataset=traces,
-        metrics=[invariant, judge, *managed],
+        metrics=[invariant, trajectory, judge, *managed],
     )
 
     # 5) Name the dominant failure pattern.

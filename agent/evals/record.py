@@ -53,10 +53,15 @@ def _run_flow(case: dict[str, Any]) -> tuple[list[dict], str]:
     calls: list[dict] = []
     flow = case["flow"]
 
-    record = look_up_customer(ctx)
-    _call(calls, "look_up_customer", {}, record)
+    # Most flows begin by reading the customer. The silent-failure flow
+    # (refund_no_lookup, Slide 4 beat B) deliberately skips it — that skipped
+    # step is the whole point: it is invisible to every amount/field check and
+    # only the trajectory invariant catches it.
+    if flow != "refund_no_lookup":
+        record = look_up_customer(ctx)
+        _call(calls, "look_up_customer", {}, record)
 
-    if flow == "refund":
+    if flow in ("refund", "refund_no_lookup"):
         charge_id, amount = case["charge_id"], case["amount"]
         decision = fraud_check(charge_id, amount, ctx)
         _call(calls, "fraud_check", {"charge_id": charge_id, "amount": amount}, decision)
@@ -67,7 +72,11 @@ def _run_flow(case: dict[str, Any]) -> tuple[list[dict], str]:
             {"charge_id": charge_id, "amount": amount},
             refund,
         )
-        reply = "All set — your refund has been processed. Anything else I can help with?"
+        reply = (
+            "Refund processed."
+            if flow == "refund_no_lookup"
+            else "All set — your refund has been processed. Anything else I can help with?"
+        )
     elif flow == "dispute":
         charge_id, reason = case["charge_id"], case.get("reason", "disputed")
         dispute = open_dispute(charge_id, reason, ctx)

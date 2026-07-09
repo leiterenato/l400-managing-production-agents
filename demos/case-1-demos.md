@@ -413,8 +413,21 @@ agent/
 
 **Mapa demo → código (as 6 superfícies):** ver tabela no `agent/README.md`.
 Comando-chave da demo offline: `uv run python -m evals.run_offline` (record →
-evaluate → report → clusters → gate exit≠0). O "wow": `refund_over_charge` →
-`refund_within_charge` VERMELHO enquanto `tone_check` fica âmbar verde.
+evaluate → report → clusters → gate exit≠0).
+
+**O um-dois do S4 (§6, corte S4) roda de ponta a ponta no `run_offline`:**
+- **A · barulhento** (`adversarial_over_refund`): `refund_within_charge` VERMELHO
+  ($500 sobre $50) enquanto `tone_check` fica verde. O check duro pega sozinho.
+- **B · silencioso** (`silent_skipped_lookup`, add 2026-07-08): refund $50 sobre
+  $50, conta certa, resposta educada — **todos os checks de valor verdes**; só o
+  invariante de **trajetória** `refund_requires_lookup` fica VERMELHO (o look-up
+  foi pulado). O `generate_loss_clusters` (análogo offline) nomeia
+  **"Incorrect Tool Selection"**. É o B que prova por que trajetória + clusters
+  existem — nenhum check de valor o enxergava.
+
+O invariante de trajetória vive em `contract.py::check_refund_requires_lookup_trace`
+(green/gating), é encenado pelo flow `refund_no_lookup` em `evals/record.py`, e tem
+o `CodeExecutionMetric` espelhado em `evals/metrics.py` para o caminho `--live`.
 
 ---
 

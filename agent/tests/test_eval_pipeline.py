@@ -24,6 +24,18 @@ def test_cross_account_fails_read_invariant():
     assert case.gate_failed
 
 
+def test_silent_skipped_lookup_only_trajectory_fails():
+    # Beat B: every value/tone check is green; only the trajectory invariant
+    # (refund preceded by a look-up) catches the skipped step.
+    result = evaluate_dataset(record_dataset())
+    case = _by_id(result)["silent_skipped_lookup"]
+    assert case.scores["refund_within_charge"] == 1.0          # amount is fine
+    assert case.scores["read_targets_session_customer"] == 1.0  # no cross-account read
+    assert case.scores["tone_check"] == 1.0                     # reply is fine
+    assert case.scores["refund_requires_lookup"] == 0.0         # only the path catches it
+    assert case.gate_failed
+
+
 def test_happy_cases_pass():
     result = evaluate_dataset(record_dataset())
     by_id = _by_id(result)
@@ -34,12 +46,15 @@ def test_happy_cases_pass():
 def test_gate_blocks_and_pass_rate():
     result = evaluate_dataset(record_dataset())
     assert not result.gate_ok
-    assert len(result.failing) == 2
-    assert result.pass_rate == 0.5
+    # happy_refund + happy_dispute pass; over_refund, silent_skipped_lookup and
+    # cross_account fail (each on exactly one invariant).
+    assert len(result.failing) == 3
+    assert result.total == 5
 
 
 def test_failure_clusters_named():
     result = evaluate_dataset(record_dataset())
     clusters = {c.pattern: c.count for c in cluster_failures(result)}
     assert clusters.get("Refund Exceeds Charge") == 1
+    assert clusters.get("Incorrect Tool Selection") == 1
     assert clusters.get("Cross-Account Data Access") == 1

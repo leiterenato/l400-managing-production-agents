@@ -127,6 +127,19 @@ The **LLM judge (amber)** grades tone and would happily pass a $500 refund on a
 $50 charge. The **hard invariant (green)** is what catches it. That is "the green
 score lies", with real money.
 
+### The Slide 4 one-two: value vs. trajectory (two ways green lies)
+
+Two invariants, two kinds of failure the demo shows side by side:
+
+- **A · loud** — `refund_within_charge` (value). A $500 refund on a $50 charge:
+  the amount check screams red while the tone judge stays green.
+- **B · silent** — `refund_requires_lookup` (trajectory). A refund that is the
+  right amount, on the right account, with a polite reply — *every value check
+  green* — but the agent skipped the customer look-up. Only the **path** catches
+  it; loss clustering names it **"Incorrect Tool Selection"**. This is the
+  trace-level invariant in `contract.py`; it gates but has no runtime guard (the
+  per-response seam sees one tool call at a time — trajectory needs the history).
+
 ### Demo scenarios (set `SCENARIO=` or pass to `run_local`)
 
 | Scenario | What it stages | Bridges to |

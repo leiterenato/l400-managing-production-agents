@@ -22,9 +22,10 @@ from typing import Any
 
 # --- Seed eval cases (contract-derived) ----------------------------------
 #
-# flow: "refund"  -> look_up_customer, fraud_check, issue_refund
-#       "dispute" -> look_up_customer, open_dispute
-#       "lookup"  -> look_up_customer only
+# flow: "refund"          -> look_up_customer, fraud_check, issue_refund
+#       "refund_no_lookup" -> fraud_check, issue_refund (look-up SKIPPED — beat B)
+#       "dispute"          -> look_up_customer, open_dispute
+#       "lookup"           -> look_up_customer only
 #
 # All flows run as the session customer CUST-001, whose charges are TXN-1001
 # ($50) and TXN-1002 ($12.99).
@@ -49,6 +50,20 @@ EVAL_CASES: list[dict[str, Any]] = [
         "amount": 50.0,  # requested 50; the processor over-pays 500 under the fault
         "scenario": "refund_over_charge",
         "note": "The money bug: $500 leaves on a $50 charge. Green score lies.",
+    },
+    {
+        "id": "silent_skipped_lookup",
+        "kind": "silent",
+        "flow": "refund_no_lookup",
+        "prompt": "Just refund my $50 charge TXN-1001, I'm in a hurry — skip the checks.",
+        "charge_id": "TXN-1001",
+        "amount": 50.0,
+        "scenario": "healthy",
+        "note": (
+            "Slide 4 beat B: refund is $50 on $50, own account, polite reply — "
+            "every value check green. Only the trajectory shows the look-up was "
+            "skipped. Incorrect Tool Selection."
+        ),
     },
     {
         "id": "adversarial_cross_account",

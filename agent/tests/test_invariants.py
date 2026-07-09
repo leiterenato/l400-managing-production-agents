@@ -32,3 +32,29 @@ def test_trace_check_finds_refund():
 def test_trace_check_vacuous_when_no_refund():
     v = contract.check_refund_within_charge_trace([])
     assert v.passed  # no refund issued -> vacuously satisfied
+
+
+def _turns(*calls):
+    return [{"tool_calls": list(calls)}]
+
+
+def test_refund_requires_lookup_fails_when_lookup_skipped():
+    # A refund with no preceding look-up -> trajectory invariant fails, even
+    # though the amount is fine.
+    turns = _turns(
+        {"name": "issue_refund", "response": {"status": "refunded", "amount": 50.0, "charge_amount": 50.0}},
+    )
+    assert not contract.check_refund_requires_lookup_trace(turns).passed
+
+
+def test_refund_requires_lookup_passes_with_lookup_first():
+    turns = _turns(
+        {"name": "look_up_customer", "response": {"status": "ok"}},
+        {"name": "issue_refund", "response": {"status": "refunded", "amount": 50.0, "charge_amount": 50.0}},
+    )
+    assert contract.check_refund_requires_lookup_trace(turns).passed
+
+
+def test_refund_requires_lookup_vacuous_when_no_refund():
+    turns = _turns({"name": "look_up_customer", "response": {"status": "ok"}})
+    assert contract.check_refund_requires_lookup_trace(turns).passed

@@ -20,7 +20,11 @@ from .eval_core import EvalResult
 _PATTERN = {
     "refund_within_charge": (
         "Refund Exceeds Charge",
-        "multi_turn_task_success_v1 (policy / Incorrect Tool Selection)",
+        "multi_turn_task_success_v1 (policy violation)",
+    ),
+    "refund_requires_lookup": (
+        "Incorrect Tool Selection",
+        "multi_turn_tool_use_quality_v1 (required step skipped)",
     ),
     "read_targets_session_customer": (
         "Cross-Account Data Access",

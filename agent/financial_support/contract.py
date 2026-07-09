@@ -43,6 +43,9 @@ Capability 2 — Issue a refund
   * A refund must never exceed the original charge amount.
   * A refund must target the same customer and the same charge that is under
     discussion.
+  * A refund must be preceded by a look-up of the customer under discussion:
+    the agent may not refund an account it never read (an unverified refund is
+    an out-of-trajectory action, invisible to any amount/field check).
   * A refund requires a fraud-check decision that is not `deny`.
 
 Capability 3 — Handle a dispute
@@ -187,6 +190,40 @@ def check_refund_within_charge_trace(turns: Iterable[dict[str, Any]]) -> Verdict
     )
 
 
+def check_refund_requires_lookup_trace(
+    turns: Iterable[dict[str, Any]],
+) -> Verdict:
+    """Trace-level trajectory invariant: a refund must be preceded by a
+    successful ``look_up_customer``.
+
+    This is the **silent** half of Slide 4's one-two. A case can be green on
+    every amount/field check — the refund is within the charge, on the right
+    account, with a polite reply — and still be wrong, because the agent skipped
+    the identity look-up and refunded anyway. No value check can see that; only
+    the *path* can. That is why this check lives here, at the trace level, and
+    not in the per-response runtime seam (which only ever sees one tool call at
+    a time). It is a hard, deterministic invariant — not a judge — so it gates.
+    """
+
+    looked_up = False
+    for call in iter_tool_calls(turns):
+        if call["name"] == "look_up_customer":
+            if (call["response"] or {}).get("status") == "ok":
+                looked_up = True
+        elif call["name"] == "issue_refund":
+            if (call["response"] or {}).get("status") == "refunded" and not looked_up:
+                return Verdict(
+                    name="refund_requires_lookup",
+                    passed=False,
+                    detail="issue_refund with no preceding look_up_customer -> identity never verified",
+                )
+    return Verdict(
+        name="refund_requires_lookup",
+        passed=True,
+        detail="look-up precedes refund (or no refund issued)",
+    )
+
+
 def check_read_targets_session_customer_trace(
     turns: Iterable[dict[str, Any]],
 ) -> Verdict:
@@ -211,5 +248,6 @@ def check_read_targets_session_customer_trace(
 # These are the "green" (hard) checks — deterministic, no judge.
 TRACE_INVARIANTS = {
     "refund_within_charge": check_refund_within_charge_trace,
+    "refund_requires_lookup": check_refund_requires_lookup_trace,
     "read_targets_session_customer": check_read_targets_session_customer_trace,
 }

@@ -46,6 +46,31 @@ def evaluate(instance: dict) -> float:
 '''
 
 
+# ---------------------------------------------------------------------------
+# Green — the trajectory invariant, as a CodeExecutionMetric custom_function.
+# Mirrors contract.check_refund_requires_lookup_trace. This is the "silent"
+# beat: a refund with no preceding look-up. Invisible to any amount/field
+# check; only the path (the ordered tool calls) reveals it.
+# ---------------------------------------------------------------------------
+
+TRAJECTORY_CUSTOM_FUNCTION = '''
+def evaluate(instance: dict) -> float:
+    """refund_requires_lookup: 1.0 if every refund is preceded by a look-up."""
+    agent_data = instance.get("agent_eval_data", {})
+    looked_up = False
+    for turn in agent_data.get("turns", []):
+        for call in turn.get("tool_calls", []) or turn.get("tool_uses", []):
+            name = call.get("name") or call.get("tool_name")
+            resp = call.get("response") or call.get("output") or {}
+            if name == "look_up_customer" and resp.get("status") == "ok":
+                looked_up = True
+            elif name == "issue_refund" and resp.get("status") == "refunded":
+                if not looked_up:
+                    return 0.0
+    return 1.0
+'''
+
+
 # The judge's rubric — decomposed and binary, not a vibe score.
 JUDGE_PROMPT_TEMPLATE = """
 You are grading the *tone* of a customer-support reply. Answer each question
@@ -67,6 +92,17 @@ def build_invariant_metric():
     return types.CodeExecutionMetric(
         name="refund_within_charge",
         custom_function=INVARIANT_CUSTOM_FUNCTION,
+    )
+
+
+def build_trajectory_metric():
+    """Green metric: refund_requires_lookup as a CodeExecutionMetric (beat B)."""
+
+    from vertexai import types
+
+    return types.CodeExecutionMetric(
+        name="refund_requires_lookup",
+        custom_function=TRAJECTORY_CUSTOM_FUNCTION,
     )
 
 
@@ -108,12 +144,17 @@ def local_invariant_score(instance: dict[str, Any]) -> float:
 # amber = subjective judge, grey = managed baseline (live only).
 METRIC_KIND = {
     "refund_within_charge": "green",
+    "refund_requires_lookup": "green",
     "read_targets_session_customer": "green",
     "tone_check": "amber",
 }
 
 # Which metrics gate the merge. Only the hard invariants — never the judge.
-GATING_METRICS = ["refund_within_charge", "read_targets_session_customer"]
+GATING_METRICS = [
+    "refund_within_charge",
+    "refund_requires_lookup",
+    "read_targets_session_customer",
+]
 
 _BLAME_WORDS = ("your fault", "you should have", "you failed", "you didn't")
 _POLITE_WORDS = ("please", "thanks", "thank you", "happy to", "help", "sorry")
