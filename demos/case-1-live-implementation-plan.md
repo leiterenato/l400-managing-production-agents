@@ -121,16 +121,24 @@ GOOGLE_CLOUD_STAGING_BUCKET=gs://<seu-bucket> \
   instrumentação — é o ponto do EDD.
 
 ### Fase 4 — S4 pré-semeado (híbrido) · construção + creds
-- **BigQuery (o item de build real):**
-  1. Criar dataset + **sink Cloud Logging → BigQuery** dos spans do agente.
-  2. **Reconciliar o schema:** `evals/queries/invariant_trend.sql` hoje assume
-     `attributes.eval.invariant.refund_within_charge` e `attributes.gen_ai.tool.name`
-     — o schema real do sink Logging→BQ **não** produz esse formato. Ajustar a query
-     ao schema real (campos aninhados do LogEntry / jsonPayload).
-  3. **Semear histórico** (meses de drift) na tabela real, para a trend query retornar
-     dados de verdade. Ver `weekly_failure_rate()` em `bigquery_scale.py` como o shape
-     alvo dos dados.
-  4. Rodar `EVAL_LIVE_CONFIRM=1 python -m evals.bigquery_scale --live`.
+- **BigQuery (o item de build real):** — **✅ schema + seeder RECONCILIADOS sem creds (2026-07-09).**
+  1. ~~Reconciliar o schema~~ **FEITO.** Raiz descoberta: spans OTel vão pro Cloud
+     Trace, que **não tem export nativo p/ BQ** → caminho GA = **Cloud Logging → BQ
+     sink** de uma **log entry estruturada** espelhando o verdict. A query foi
+     reescrita p/ o schema **LogEntry/jsonPayload** real (`jsonPayload.invariant_passed`,
+     `jsonPayload.tool_name`), não mais o atributo pontuado inexistente. Schema da
+     tabela em `evals/queries/agent_spans_schema.json` (validado contra o SDK real do
+     BQ, `SchemaField.from_api_repr`).
+  2. ~~Escrever o seeder~~ **FEITO.** `bigquery_scale.py` ganhou `synthetic_rows()`
+     (corpus expandido em linhas LogEntry, semanas alinhadas ao domingo p/ casar com
+     `DATE_TRUNC(..,WEEK)`), `weekly_from_rows()` (re-agrega igual à SQL) e
+     `seed_bigquery()` (cria dataset+tabela particionada e faz `load_table_from_json`,
+     guardado). +7 testes (34 verdes) provam que o corpus re-agrega no
+     `weekly_failure_rate()`. Inspeção offline: `python -m evals.bigquery_scale --dump`.
+  3. **Com creds (falta):** criar o **sink Cloud Logging → BigQuery** de verdade
+     (ou usar o seeder), **semear** e validar. Só o passo que precisa de GCP.
+  4. Semear: `EVAL_LIVE_CONFIRM=1 python -m evals.bigquery_scale --seed` (anchor=hoje);
+     conferir: `EVAL_LIVE_CONFIRM=1 python -m evals.bigquery_scale --live`.
 - **Online Monitor:** manter `evals/online_monitor.py` como a view **semeada** (janela
   deslizante + alerta), com framing honesto ("stream semeado de um ambiente real").
   Opcional: apontar para a aba Evaluation (online monitors) do agente deployado se
@@ -153,10 +161,10 @@ gcloud builds submit --config deploy/cloudbuild.yaml
 
 Ordenado por valor:
 
-1. **Reconciliar o schema BigQuery (maior valor).** Descobrir o schema real do sink
-   Cloud Logging→BQ para spans OTel do ADK, corrigir `invariant_trend.sql`, e escrever
-   um *seeder* que popula a tabela `agent_spans` com o corpus histórico (meses de
-   drift, shape de `weekly_failure_rate()`). Sem isso a Fase 4/BQ não roda.
+1. ~~**Reconciliar o schema BigQuery (maior valor).**~~ **✅ FEITO (2026-07-09).** Ver
+   Fase 4 acima: query reescrita p/ LogEntry/jsonPayload, schema em
+   `agent_spans_schema.json`, seeder + testes no `bigquery_scale.py`. Falta só o passo
+   com creds (criar o sink / semear a tabela real).
 2. **Endurecer `evals/live.py`** contra o drift de API Preview mais provável (revisão
    contra as assinaturas documentadas; deixar mensagens de erro claras para o dia da
    validação com creds).
@@ -172,8 +180,11 @@ Ordenado por valor:
   `silent_skipped_lookup` + flow `refund_no_lookup` (`evals/record.py`), cluster
   **"Incorrect Tool Selection"** (`evals/clusters.py`), `CodeExecutionMetric`
   espelhado no `--live` (`evals/metrics.py`). O um-dois A/B roda em `run_offline`.
+- **Schema BQ + seeder RECONCILIADOS (2026-07-09):** query em LogEntry/jsonPayload,
+  `agent_spans_schema.json`, `synthetic_rows`/`weekly_from_rows`/`seed_bigquery` +
+  `--dump`/`--seed` no `bigquery_scale.py`. (Tarefa sem-creds #1 concluída.)
 - **Offline tudo verde:** `run_offline` (5 casos, 3 falham, gate BLOCK),
-  `online_monitor` (alerta t=42), `bigquery_scale` (drift semana 7→12), **27 testes**.
+  `online_monitor` (alerta t=42), `bigquery_scale` (drift semana 7→12), **34 testes**.
 - **Gaps offline ainda abertos (fora deste plano, opcionais):** gerador
   contrato→cases da demo pt.1 (hoje `EVAL_CASES` é lista à mão); caso "policy/recusa";
   grey (RubricMetric) só no `--live`. Ver `case-1-demo-review` na memória.

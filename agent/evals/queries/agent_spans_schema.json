@@ -1,0 +1,35 @@
+[
+  {"name": "timestamp", "type": "TIMESTAMP", "mode": "REQUIRED",
+   "description": "LogEntry.timestamp — when the tool verdict was emitted."},
+  {"name": "receiveTimestamp", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "severity", "type": "STRING", "mode": "NULLABLE",
+   "description": "ERROR when the invariant failed, INFO otherwise."},
+  {"name": "logName", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "insertId", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "trace", "type": "STRING", "mode": "NULLABLE",
+   "description": "projects/<p>/traces/<trace_id> — links the row back to the Cloud Trace span the eval reads."},
+  {"name": "spanId", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "resource", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "type", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "labels", "type": "RECORD", "mode": "NULLABLE", "fields": [
+      {"name": "project_id", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "location", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "reasoning_engine_id", "type": "STRING", "mode": "NULLABLE"}
+    ]}
+  ]},
+  {"name": "labels", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "agent", "type": "STRING", "mode": "NULLABLE"}
+  ]},
+  {"name": "jsonPayload", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "tool_name", "type": "STRING", "mode": "NULLABLE",
+     "description": "Mirror of the gen_ai.tool.name span attribute."},
+    {"name": "invariant_name", "type": "STRING", "mode": "NULLABLE",
+     "description": "Which contract invariant this verdict is for."},
+    {"name": "invariant_passed", "type": "BOOLEAN", "mode": "NULLABLE",
+     "description": "Mirror of the eval.invariant.<name> span attribute."},
+    {"name": "refund_amount", "type": "FLOAT", "mode": "NULLABLE"},
+    {"name": "charge_amount", "type": "FLOAT", "mode": "NULLABLE"},
+    {"name": "session_customer_id", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "read_customer_id", "type": "STRING", "mode": "NULLABLE"}
+  ]}
+]
