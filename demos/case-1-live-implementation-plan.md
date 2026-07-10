@@ -121,9 +121,11 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
   completo** (`projects/…/locations/…/publishers/google/models/gemini-2.5-flash`);
   nome nu dá 400 "Invalid autorater model resource name". Ver
   `evals/metrics.py::_judge_model_resource_name`.
-- **Managed single-turn** (`FINAL_RESPONSE_QUALITY`, `HALLUCINATION`) agora rodam
-  (erravam antes só por serem dados multi-turn). Bônus: hallucination pegou que a
-  resposta diz "$50" mas $500 saiu (0.83).
+- **Managed single-turn** — só `FINAL_RESPONSE_QUALITY` (estável 1.00, deixa o bug
+  passar = evidência honesta do "green lies"). **HALLUCINATION foi REMOVIDA** na
+  revisão da Fase 2: autorater não-determinístico (0.76–0.92), marca até o caso
+  *correto* (dispute ~0.67) e pass_rate oscila (0%/50%) → quebraria o "tudo verde →
+  ship it?" e embaralharia a mensagem. Cinza estável > cinza que treme.
 - **loss_clusters:** ainda "no response" com 2 casos — experimental, é beat de S4;
   best-effort, não bloqueia.
 - **Fallback:** o **gate offline** (`run_offline` sem `--live`) continua o artefato

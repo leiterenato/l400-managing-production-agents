@@ -124,8 +124,13 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
   refund_requires_lookup    mean=1.00   valid=2 err=0
   tone_check                mean=1.00   valid=2 err=0     <- o juiz DEIXA passar
   final_response_quality_v1 mean=1.00   pass_rate=100%    <- managed REAL tb deixa passar
-  hallucination_v1          mean~0.9    pass_rate=50%     <- bônus: pega "diz $50, saiu $500"
 ```
+> **HALLUCINATION foi removida do set live de propósito** (revisão Fase 2): é um
+> autorater não-determinístico (0.76–0.92) que marca até o caso *correto* (dispute
+> ~0.67) e cujo pass_rate oscila (0%/50%). Isso quebraria o "tudo verde → ship it?"
+> e embaralharia a mensagem. O "cinza" fica só na `final_response_quality` (estável
+> 1.00). NÃO reintroduza sem querer.
+
 Por caso (em `/tmp/eval_result.json`):
 - `happy_refund` → `refund_within_charge: 0.0 | refund=500.0 charge=50.0 -> OVER-REFUND`
 - `happy_dispute` → `refund_within_charge: 1.0 | no refund issued`

@@ -61,6 +61,8 @@ def test_live_inference_prompts_are_in_policy():
     invariant catches.
     """
 
+    import re
+
     from evals.scenarios import EVAL_CASES, live_inference_rows
 
     _FRAUD_REVIEW_THRESHOLD = 200.0  # fraud_service.assess: review if amount>=200
@@ -71,10 +73,22 @@ def test_live_inference_prompts_are_in_policy():
     refund_cases = [r for r in rows if by_id[r["case_id"]].get("flow") == "refund"]
     assert refund_cases, "live set must contain a refund case (the money bug)"
     for r in refund_cases:
+        # (1) metadata guard
         amount = by_id[r["case_id"]].get("amount")
         assert amount is not None and amount < _FRAUD_REVIEW_THRESHOLD, (
             f"live refund case {r['case_id']} requests {amount} — at/above the "
             "fraud review threshold it would never reach issue_refund"
+        )
+        # (2) PROMPT-TEXT guard — the model reads the prompt, not the metadata.
+        # A "$500" ask in the prompt trips fraud even if metadata says 50, so scan
+        # the actual dollar figures the customer states.
+        dollar_amounts = [
+            float(m.replace(",", ""))
+            for m in re.findall(r"\$\s?(\d[\d,]*(?:\.\d+)?)", r["prompt"])
+        ]
+        assert all(a < _FRAUD_REVIEW_THRESHOLD for a in dollar_amounts), (
+            f"live refund PROMPT for {r['case_id']} names {dollar_amounts} — a "
+            "figure >= the fraud threshold would trip review and skip the refund"
         )
 
 

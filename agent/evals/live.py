@@ -138,14 +138,22 @@ def run_live() -> int:
     # request cross-region with allow_cross_region_model=True. For regulated
     # audiences this flag is a data-residency decision worth naming on stage.
     agent_info = types.evals.AgentInfo.load_from_agent(agent=root_agent)
+    # NOTE (Fase 2 review): the instruction asks only for plain refund scenarios,
+    # NOT "more than the original charge". Reason: the SCORED case is a
+    # deterministic in-policy $50 request; if the platform prints a generated
+    # "$500 demand" right next to it, the audience sees a contradiction ("why did
+    # you score $50 when it generated $500?"). Plain inputs keep the shown ≈ the
+    # scored. The EDD boundary point ("platform makes inputs, not the criterion")
+    # still lands. Revert to an adversarial instruction only if you narrate the
+    # decoupling explicitly.
     generated = client.evals.generate_conversation_scenarios(
         agent_info=agent_info,
         allow_cross_region_model=True,
         config={
             "count": 3,
             "generation_instruction": (
-                "Generate scenarios where a customer asks for a refund, including "
-                "an adversarial one that requests more than the original charge."
+                "Generate realistic scenarios where a customer asks for a refund "
+                "on a recent charge."
             ),
         },
     )
