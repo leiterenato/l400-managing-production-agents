@@ -86,9 +86,10 @@ Duas formas do **mesmo código**, com papéis diferentes — e isso é o ponto:
 
 - **Runtime:** um **ADK `after_tool_callback`** no `issue_refund`. O mesmo hook que
   emite o span OTel também checa o invariante.
-- **Teste (eval):** a mesma lógica embrulhada em `types.CodeExecutionMetric`
-  (`evaluate(instance) -> float` lê `instance['agent_eval_data']['turns']`, acha a
-  chamada `issue_refund` e compara com o `charge`).
+- **Teste (eval):** a mesma lógica embrulhada em `types.Metric(custom_function=<callable
+  local>)` — o callable importa o `contract.py` e roda **in-process** (não é code
+  string num sandbox); lê o `instance` da plataforma (`instance['agent_data']` ao
+  vivo, `agent_eval_data` offline), acha a chamada `issue_refund` e compara com o `charge`.
 - **Inner loop (dev):** **Evaluation Service** — `client.evals.evaluate(...)` do
   terminal do VSCode; resultado na aba **Evaluation** do Console.
 - **Gate (merge):** **Cloud Build** roda o **mesmo** script no PR; score < threshold
@@ -116,7 +117,8 @@ Evaluation + Observability, 12 subpáginas, + guia OTel do ADK). Nomes de API/CL
   obrigatórios do span são exatamente o que o eval consome → *um substrato, três
   disciplinas*, provável em código.
 - ✅ As **duas métricas custom mapeiam 1:1 nas cores do Slide 2:** verde (invariante
-  duro) = `CodeExecutionMetric`; âmbar (subjetivo) = `LLMMetric`. São **classes reais**.
+  duro) = `types.Metric` com `custom_function` (callable local, in-process); âmbar
+  (subjetivo) = `types.LLMMetric`. São **classes reais**.
 
 ### 3.2 Mapa de componentes
 
@@ -128,7 +130,7 @@ Evaluation + Observability, 12 subpáginas, + guia OTel do ADK). Nomes de API/CL
 | **Cloud Logging** | Logs do agente; sink → BigQuery | Managed | GA |
 | **Topology** | Grafo A2A + MCP a partir de traces agregados | Managed | **Preview** |
 | **Gen AI Evaluation Service** (`client.evals`) | `generate_conversation_scenarios` · `run_inference` · `evaluate` · `generate_loss_clusters` | Managed | **Preview** |
-| **Metric Registry** | Managed: `types.RubricMetric.*`. **Seus:** `types.CodeExecutionMetric` + `types.LLMMetric` | **Metade sua** | **Preview** |
+| **Metric Registry** | Managed: `types.RubricMetric.*`. **Seus:** `types.Metric` (custom_function local) + `types.LLMMetric` | **Metade sua** | **Preview** |
 | **Online Monitors** (`OnlineEvaluator`) | Amostra traces de produção (~10 min) → Logging + Monitoring | Managed | **Preview** |
 | **Cloud Monitoring** | Alert policy `online_evaluator/scores < threshold` → Slack/email/PubSub (**só notifica**) | Managed | GA |
 | **Cloud Build** | Roda o eval no PR; gate de merge (**não nativo**) | Managed | GA |
@@ -162,24 +164,25 @@ traces = client.evals.run_inference(
 )
 
 # 3) Manage metrics — o "certo" (EDD): invariante duro + juiz + baseline managed
-invariant = types.CodeExecutionMetric(name="refund_within_charge", custom_function="""
-def evaluate(instance: dict) -> float:
-    agent_data = instance.get('agent_eval_data', {})
-    for turn in agent_data.get('turns', []):
-        ...  # acha issue_refund; retorna 1.0 se refund <= charge, senão 0.0
-""")
-judge = types.LLMMetric(name="tone_check", prompt_template="...", result_parsing_function="...")
-client.evals.create_evaluation_metric(metric=invariant)
-client.evals.create_evaluation_metric(metric=judge)
+# O invariante verde é um types.Metric cujo custom_function é um CALLABLE LOCAL
+# (importa contract.py e roda in-process via CustomMetricHandler) — NÃO uma code
+# string num sandbox, e NÃO precisa de create_evaluation_metric (vai direto no
+# evaluate()). "One function, three jobs" fica literal, sem cópia que deriva.
+def refund_within_charge(instance: dict) -> dict:  # in-process, importa o contrato
+    turns = platform_instance_to_turns(instance)   # agent_data (live) -> turns
+    v = contract.check_refund_within_charge_trace(turns)
+    return {"score": v.score, "explanation": v.detail}
+
+invariant = types.Metric(name="refund_within_charge", custom_function=refund_within_charge)
+judge = types.LLMMetric(name="tone_check", prompt_template="...", judge_model="...")
 
 # 4) Run offline evaluation
 result = client.evals.evaluate(
-    dataset=eval_dataset,
+    dataset=traces,
     metrics=[
-        types.RubricMetric.FINAL_RESPONSE_QUALITY,   # managed, adaptive rubric
-        types.RubricMetric.HALLUCINATION,            # managed, static rubric
-        types.RubricMetric.SAFETY,                   # managed (1=safe, 0=unsafe)
-        # + invariant + judge (custom, registrados acima)
+        invariant,                                   # verde: types.Metric (custom_function local)
+        judge,                                       # âmbar: LLMMetric (juiz)
+        types.RubricMetric.SAFETY,                   # cinza managed (deixa o bug passar; safe != correto)
     ],
 )
 result.show()  # nota: renderer de notebook — na demo usamos a aba Evaluation do Console
@@ -229,9 +232,9 @@ A armadilha mais perigosa da demo. A plataforma:
 - `generate_conversation_scenarios` gera **INPUTS** (starting prompt + conversation
   plan). É **user simulation**. **NÃO sabe o que é "certo".** Pressupõe agente rodável.
 
-EDD é o que **você** faz **a montante**: derivar do **contrato** os **invariantes /
-`CodeExecutionMetric`** — o critério de "certo". *Essa é a parte que nenhuma
-ferramenta te dá.*
+EDD é o que **você** faz **a montante**: derivar do **contrato** os **invariantes**
+(o verde = `types.Metric` com `custom_function` local) — o critério de "certo".
+*Essa é a parte que nenhuma ferramenta te dá.*
 
 **Consequência de palco:** ao mostrar `generate_conversation_scenarios`, **nomear a
 fronteira explicitamente** ("a plataforma gera os inputs; o 'certo' fui eu que
@@ -262,8 +265,8 @@ que corrige a própria spec."*
 ### Superfície 2 — Autorar o eval / Manage Metrics *(S3)*
 - Cobre: Agent evaluation (conceito) + Manage evaluation metrics.
 - Papel: a fronteira EDD. Três métricas, papéis distintos: sua/dura
-  (`CodeExecutionMetric`, verde), sua/subjetiva (`LLMMetric`, âmbar, Gemini mais
-  recente), managed/baseline (`RubricMetric.*`, cinza).
+  (`types.Metric` com `custom_function` local, verde), sua/subjetiva (`LLMMetric`,
+  âmbar, Gemini mais recente), managed/baseline (`RubricMetric.*`, cinza).
 - Status: Preview. Lógica do invariante = portável (pytest).
 
 ### Superfície 3 — Rodar offline + simular + gate *(S3)*
@@ -321,8 +324,9 @@ Pergunta viva que atravessa os cortes: *"o placar tá verde. Pode dar deploy?"*
 
 ### Corte S3 — "O placar verde mente" — pt.1: você escreve o gabarito *(~2 min, real)*
 1. **VSCode `contract.py`:** contrato em linguagem simples; seleciona *"nunca
-   reembolsar mais que a cobrança"* → vira **3 linhas** de `CodeExecutionMetric`.
-   *"Isto é EDD: o teste sai do contrato, antes do agente rodar."*
+   reembolsar mais que a cobrança"* → vira uma métrica custom (`types.Metric` com
+   `custom_function` local que importa o próprio `contract.py`).
+   *"Isto é EDD: o teste sai do contrato, antes do agente rodar — e é a MESMA função."*
 2. **VSCode:** ao lado, `LLMMetric` (juiz de tom) + lista de `RubricMetric` managed.
    *"Verde = eu provo. Âmbar = precisa de juiz. Cinza = baseline da Google."*
 3. **A fronteira (momento intelectual):** roda `generate_conversation_scenarios` →
@@ -333,8 +337,8 @@ Pergunta viva que atravessa os cortes: *"o placar tá verde. Pode dar deploy?"*
    dos times para."*
 
 ### Corte S4 — "O placar verde mente" — pt.2: o dinheiro *(~2 min, clímax, formato a decidir)*
-1. **O um-dois — A · o barulhento:** clica no caso do dinheiro. `CodeExecutionMetric`
-   `refund ≤ charge` **VERMELHO**: o agente reembolsou **$500** numa cobrança de **$50**
+1. **O um-dois — A · o barulhento:** clica no caso do dinheiro. O invariante custom
+   `refund ≤ charge` (`types.Metric`) **VERMELHO**: o agente reembolsou **$500** numa cobrança de **$50**
    — e o juiz de tom classificou como "prestativa e educada" (**verde**). **O placar verde
    mente — com dinheiro real.** O check duro pega sozinho; o "porquê" é óbvio (refund >
    charge). *(fala neutra sobre o formato; não afirmar "ao vivo" se for gravação.)*
@@ -408,7 +412,7 @@ agent/
                        # · online_monitor · bigquery_scale · queries/*.sql · live · run_offline
   deploy/opentelemetry.env · cloudbuild.yaml   # substrato + gate (Cloud Build, não nativo)
   scripts/run_local.py # dirige tool+seam offline (sem modelo)
-  tests/               # 23 testes verdes
+  tests/               # 46 testes verdes
 ```
 
 **Mapa demo → código (as 6 superfícies):** ver tabela no `agent/README.md`.
@@ -427,7 +431,8 @@ evaluate → report → clusters → gate exit≠0).
 
 O invariante de trajetória vive em `contract.py::check_refund_requires_lookup_trace`
 (green/gating), é encenado pelo flow `refund_no_lookup` em `evals/record.py`, e tem
-o `CodeExecutionMetric` espelhado em `evals/metrics.py` para o caminho `--live`.
+a métrica custom (`types.Metric` com `custom_function` local) espelhada em
+`evals/metrics.py` para o caminho `--live`.
 
 ---
 

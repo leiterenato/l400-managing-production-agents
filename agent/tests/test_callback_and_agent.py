@@ -58,6 +58,32 @@ def test_passing_refund_records_nothing():
     assert "invariant_violations" not in ctx.state
 
 
+def test_deny_then_refund_is_recorded():
+    # The fraud tool stashes its decision on state; a refund that pays out after
+    # a DENY violates the fraud invariant (observe mode records it).
+    os.environ["INVARIANT_ENFORCEMENT"] = "observe"
+    reload_settings()
+    ctx = FakeToolContext()
+    ctx.state["last_fraud_decision"] = {"status": "ok", "decision": "deny"}
+    resp = {"status": "refunded", "amount": 50.0, "charge_amount": 50.0}
+    out = enforce_invariants(FakeTool("issue_refund"), {}, ctx, resp)
+    assert out is None  # observe: money stands, eval/seam catches it
+    names = {v["name"] for v in ctx.state["invariant_violations"]}
+    assert "refund_after_fraud_decision" in names
+
+
+def test_block_mode_over_refund_reports_within_charge_first():
+    # With both a $500/$50 over-refund AND a deny, the money check is ordered
+    # first, so it is the one that blocks (keeps the demo's headline invariant).
+    os.environ["INVARIANT_ENFORCEMENT"] = "block"
+    reload_settings()
+    ctx = FakeToolContext()
+    ctx.state["last_fraud_decision"] = {"status": "ok", "decision": "deny"}
+    resp = {"status": "refunded", "amount": 500.0, "charge_amount": 50.0}
+    out = enforce_invariants(FakeTool("issue_refund"), {}, ctx, resp)
+    assert out is not None and out["blocked_by_invariant"] == "refund_within_charge"
+
+
 def test_agent_graph_shape():
     from financial_support import root_agent
 

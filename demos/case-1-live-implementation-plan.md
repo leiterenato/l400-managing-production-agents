@@ -68,12 +68,16 @@ gcloud auth application-default login
 # 4) Staging bucket para o Agent Runtime
 gsutil mb -l $GOOGLE_CLOUD_LOCATION gs://<seu-bucket>
 
-# 5) Confirmar acesso ao modelo gemini-2.5-flash no Vertex (região us-central1)
+# 5) Confirmar acesso a AMBOS os modelos no Vertex:
+#    - gemini-3.5-flash @ global  -> o AGENTE (run_inference; global-only, por isso
+#      allow_cross_region_model=True no eval que roda em us-central1)
+#    - gemini-2.5-flash @ us-central1 -> o JUIZ (LLMMetric autorater)
 
 # 6) Preencher agent/.env a partir do .env.example
 ```
 
-**Checklist de saída da Fase 0:** ADC ok · APIs on · bucket criado · modelo acessível
+**Checklist de saída da Fase 0:** ADC ok · APIs on · bucket criado · **ambos** os
+modelos acessíveis (agente `gemini-3.5-flash@global` + juiz `gemini-2.5-flash@us-central1`)
 · `agent/.env` preenchido.
 
 ---
@@ -100,7 +104,7 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
 ```
 - **Payoff PROVADO ao vivo.** Scoreboard real (2 casos determinísticos):
   `refund_within_charge mean=0.50` (dispute verde, refund **0.0 → OVER-REFUND
-  $500 sobre $50**) enquanto `tone_check=1.00` e `final_response_quality=1.00`
+  $500 sobre $50**) enquanto `tone_check=1.00` e `safety=1.00`
   passam. "The green score lies", determinístico e repetível.
 - **Decisão-chave (desacoplar do simulador):** o simulador de usuário é
   não-determinístico e às vezes nunca dispara o over-refund → invariante ficava
@@ -121,15 +125,17 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
   completo** (`projects/…/locations/…/publishers/google/models/gemini-2.5-flash`);
   nome nu dá 400 "Invalid autorater model resource name". Ver
   `evals/metrics.py::_judge_model_resource_name`.
-- **Managed single-turn** — só `FINAL_RESPONSE_QUALITY` (estável 1.00, deixa o bug
-  passar = evidência honesta do "green lies"). **HALLUCINATION foi REMOVIDA** na
-  revisão da Fase 2: autorater não-determinístico (0.76–0.92), marca até o caso
-  *correto* (dispute ~0.67) e pass_rate oscila (0%/50%) → quebraria o "tudo verde →
-  ship it?" e embaralharia a mensagem. Cinza estável > cinza que treme.
+- **Managed single-turn** — cinza = **`SAFETY`** (estável 1.00/1.00/1.00 num probe de
+  3 evaluates; `scripts/managed_probe.py`), deixa o bug passar = evidência honesta do
+  "green lies", e o beat fica limpo (*safe ≠ correto*). **`FINAL_RESPONSE_QUALITY` E
+  `HALLUCINATION` foram REMOVIDAS** (revisão Fase 2): autoraters não-determinísticos
+  (FRQ 0.33/0.67/1.00, dinga o caso *correto* por não narrar transfer; HALLUCINATION
+  0.76–0.92) → oscilam o pass_rate e quebrariam o "tudo verde → ship it?". Cinza
+  estável > cinza que treme. (`TOOL_USE_QUALITY` quase serviu mas deu 0.80 numa rodada.)
 - **loss_clusters:** ainda "no response" com 2 casos — experimental, é beat de S4;
   best-effort, não bloqueia.
 - **Fallback:** o **gate offline** (`run_offline` sem `--live`) continua o artefato
-  determinístico/verde se a API Preview quebrar no dia. 40 testes verdes.
+  determinístico/verde se a API Preview quebrar no dia. 46 testes verdes.
 - **Fronteira EDD (dizer no palco):** a plataforma gera os *inputs*; o *critério de
   certo* (o invariante) veio do contrato. Determinismo deixa isso ainda mais nítido:
   o input adversarial também sai do contrato. Ver `demos/case-1-demos.md §4`.
@@ -159,7 +165,7 @@ GOOGLE_CLOUD_STAGING_BUCKET=gs://<seu-bucket> \
      (corpus expandido em linhas LogEntry, semanas alinhadas ao domingo p/ casar com
      `DATE_TRUNC(..,WEEK)`), `weekly_from_rows()` (re-agrega igual à SQL) e
      `seed_bigquery()` (cria dataset+tabela particionada e faz `load_table_from_json`,
-     guardado). +7 testes (34 verdes) provam que o corpus re-agrega no
+     guardado). +7 testes (34 verdes à época; 46 hoje) provam que o corpus re-agrega no
      `weekly_failure_rate()`. Inspeção offline: `python -m evals.bigquery_scale --dump`.
   3. **Com creds (falta):** criar o **sink Cloud Logging → BigQuery** de verdade
      (ou usar o seeder), **semear** e validar. Só o passo que precisa de GCP.
@@ -204,13 +210,13 @@ Ordenado por valor:
 - **Beat B do S4 FEITO** (esta sessão): invariante de trajetória
   `refund_requires_lookup` (`contract.py`, green/gating, sem runtime guard), case
   `silent_skipped_lookup` + flow `refund_no_lookup` (`evals/record.py`), cluster
-  **"Incorrect Tool Selection"** (`evals/clusters.py`), `CodeExecutionMetric`
-  espelhado no `--live` (`evals/metrics.py`). O um-dois A/B roda em `run_offline`.
+  **"Incorrect Tool Selection"** (`evals/clusters.py`), métrica custom (`types.Metric`
+  com `custom_function` local) espelhada no `--live` (`evals/metrics.py`). O um-dois A/B roda em `run_offline`.
 - **Schema BQ + seeder RECONCILIADOS (2026-07-09):** query em LogEntry/jsonPayload,
   `agent_spans_schema.json`, `synthetic_rows`/`weekly_from_rows`/`seed_bigquery` +
   `--dump`/`--seed` no `bigquery_scale.py`. (Tarefa sem-creds #1 concluída.)
 - **Offline tudo verde:** `run_offline` (5 casos, 3 falham, gate BLOCK),
-  `online_monitor` (alerta t=42), `bigquery_scale` (drift semana 7→12), **34 testes**.
+  `online_monitor` (alerta t=42), `bigquery_scale` (drift semana 7→12), **46 testes**.
 - **Gaps offline ainda abertos (fora deste plano, opcionais):** gerador
   contrato→cases da demo pt.1 (hoje `EVAL_CASES` é lista à mão); caso "policy/recusa";
   grey (RubricMetric) só no `--live`. Ver `case-1-demo-review` na memória.

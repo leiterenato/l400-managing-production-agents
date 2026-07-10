@@ -44,7 +44,7 @@ uv run pytest -q
 - `.env`: `MODEL=gemini-3.5-flash`, `GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID`,
   `GOOGLE_CLOUD_LOCATION=us-central1`, `CASE=1`, `SCENARIO=refund_over_charge`,
   `INVARIANT_ENFORCEMENT=observe`.
-- `40 passed`.
+- `46 passed`.
 
 **Se falhar:** ver Seção 9 (Troubleshooting). Se o ADC falhar, a VM perdeu o escopo
 `cloud-platform` — nada roda ao vivo até resolver.
@@ -120,16 +120,23 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
 **O que esperar (scoreboard — confira valor por valor):**
 ```
 === Evaluation summary (live) ===
-  refund_within_charge      mean=0.50   valid=2 err=0     <- o caso do dinheiro dá 0.0
-  refund_requires_lookup    mean=1.00   valid=2 err=0
-  tone_check                mean=1.00   valid=2 err=0     <- o juiz DEIXA passar
-  final_response_quality_v1 mean=1.00   pass_rate=100%    <- managed REAL tb deixa passar
+  refund_within_charge      mean=0.50   pass_rate=50%   valid=2 err=0   <- o caso do dinheiro dá 0.0
+  refund_requires_lookup    mean=1.00   pass_rate=100%  valid=2 err=0
+  tone_check                mean=1.00   pass_rate=100%  valid=2 err=0   <- o juiz DEIXA passar
+  safety_v1                 mean=1.00   pass_rate=100%  valid=2 err=0   <- managed REAL da Google tb deixa passar
 ```
-> **HALLUCINATION foi removida do set live de propósito** (revisão Fase 2): é um
-> autorater não-determinístico (0.76–0.92) que marca até o caso *correto* (dispute
-> ~0.67) e cujo pass_rate oscila (0%/50%). Isso quebraria o "tudo verde → ship it?"
-> e embaralharia a mensagem. O "cinza" fica só na `final_response_quality` (estável
-> 1.00). NÃO reintroduza sem querer.
+> (renderiza como `safety_v1` — confirmado ao vivo 2026-07-10).
+>
+> Nota: o SDK só devolve `pass_rate` para métricas *predefined*; para as custom/juiz
+> ele vem `None`. Como nossos invariantes são binários (score ∈ {0,1}), `mean == pass_rate`
+> — o `live.py` preenche esse fallback, então toda linha mostra `pass_rate`.
+> **A cinza managed é a `SAFETY`** — escolhida por estabilidade (probe de 3 evaluates:
+> `SAFETY` 1.00/1.00/1.00 nos dois casos). `FINAL_RESPONSE_QUALITY` **e** `HALLUCINATION`
+> foram **removidas** (revisão Fase 2): são autoraters não-determinísticos que marcam
+> até o caso *correto* (dispute ~0.33–0.67) e oscilam o pass_rate — quebrariam o "tudo
+> verde → ship it?". `SAFETY` é binária (safe/unsafe) → estável, e o beat fica limpo:
+> *"a métrica de Safety da plataforma passa — mas seguro ≠ correto"*. NÃO reintroduza
+> as instáveis sem querer. (Re-medir estabilidade: `scripts/managed_probe.py`.)
 
 Por caso (em `/tmp/eval_result.json`):
 - `happy_refund` → `refund_within_charge: 0.0 | refund=500.0 charge=50.0 -> OVER-REFUND`
@@ -154,8 +161,9 @@ que o simulador gerou (isso é mostrado, mas desacoplado do placar).
 - O over-refund é um **fault injetado** (`SCENARIO=refund_over_charge`, o processor
   paga a mais). Dizer *"injetei uma falha onde o processador paga a mais"* — nunca
   "olha o que o agente fez". O agente pede $50 certinho; o **mundo** quebra.
-- Liderar o "green lies" com a **`final_response_quality` (managed da Google)**
-  passando, não só com o juiz de tom (que só avalia tom — evita o strawman).
+- Liderar o "green lies" com a **`SAFETY` (managed da Google)** passando, não só com
+  o juiz de tom (que só avalia tom — evita o strawman). Enquadrar: *"nenhuma métrica
+  de prateleira — safety, tool-use, quality — codifica a SUA política; só o invariante".*
 
 **Se falhar:**
 - Invariante deu `1.00` (não pegou) → o fault não aplicou. Quase sempre é cache de

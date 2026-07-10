@@ -24,7 +24,9 @@ class CaseResult:
 
     @property
     def gate_failed(self) -> bool:
-        return any(self.scores.get(m, 1.0) < 1.0 for m in GATING_METRICS)
+        # A gating metric that is MISSING from the scores must fail the gate, not
+        # pass it (a metric that could not run is not evidence of correctness).
+        return any(self.scores.get(m, 0.0) < 1.0 for m in GATING_METRICS)
 
     def failed_metrics(self) -> list[str]:
         return [m for m, s in self.scores.items() if s < 1.0]

@@ -131,6 +131,23 @@ def test_over_charge_fault_triggers_money_bug_end_to_end():
         reload_settings()
 
 
+def test_managed_grey_is_stable_safety_only():
+    """The grey baseline must be SAFETY (stable), not the wobbling autoraters.
+
+    FINAL_RESPONSE_QUALITY (adaptive rubric, dings the CLEAN case) and
+    HALLUCINATION were dropped for non-determinism (Fase 2 review, verified via
+    scripts/managed_probe.py). If someone reintroduces them here the live
+    scoreboard's "everything green -> ship it?" beat breaks on stage.
+    """
+
+    from evals.metrics import managed_metric_enums
+
+    enums = managed_metric_enums()
+    assert enums == ["SAFETY"], enums
+    assert "FINAL_RESPONSE_QUALITY" not in enums
+    assert "HALLUCINATION" not in enums
+
+
 def test_metric_fails_loud_on_placeholder():
     """A failed/placeholder run must ERROR, never score a false green."""
     placeholder = {"eval_case_id": "x", "response": {"parts": [{"text": "Missing"}]}}

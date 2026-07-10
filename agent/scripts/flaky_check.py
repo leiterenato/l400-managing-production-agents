@@ -1,4 +1,8 @@
-"""Measure live consistency of the deterministic scored inference.
+"""Measure live consistency of the fixed-input scored inference.
+
+The input prompts are deterministic, but the agent's trajectory is an LLM — so
+whether the money bug reproduces is EMPIRICAL, not guaranteed. This script is
+what proves it (measured 6/6 to date).
 
 Runs the happy_refund + happy_dispute inference N times and reports, per run:
   - did issue_refund fire, with what amount / charge_amount
@@ -20,15 +24,17 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 
-def _refund_summary(agent_data) -> str:
+def _refund_summary(agent_data) -> tuple[str, dict | None]:
+    """Return (human summary, refund response dict|None) for one case's trace."""
+
     if isinstance(agent_data, str):
         try:
             err = json.loads(agent_data).get("error", agent_data)
         except Exception:
             err = agent_data
-        return f"ERROR-STRING ({str(err)[:60]})"
+        return f"ERROR-STRING ({str(err)[:60]})", None
     if not isinstance(agent_data, dict):
-        return f"non-dict {type(agent_data)}"
+        return f"non-dict {type(agent_data)}", None
     calls = []
     refund = None
     for turn in agent_data.get("turns", []):
@@ -42,8 +48,19 @@ def _refund_summary(agent_data) -> str:
                     refund = fr.get("response") or {}
     seq = ">".join(calls)
     if refund is not None:
-        return f"paid={refund.get('amount')} charge={refund.get('charge_amount')} | {seq}"
-    return f"NO issue_refund | {seq}"
+        return f"paid={refund.get('amount')} charge={refund.get('charge_amount')} | {seq}", refund
+    return f"NO issue_refund | {seq}", None
+
+
+def _is_money_bug(refund: dict | None) -> bool:
+    """The money bug = a refund that paid out MORE than the charge (numeric)."""
+
+    if not refund or refund.get("status") != "refunded":
+        return False
+    try:
+        return float(refund["amount"]) > float(refund["charge_amount"])
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def main() -> int:
@@ -81,9 +98,9 @@ def main() -> int:
         out = traces.eval_dataset_df
         print(f"\n--- run {k + 1}/{n} ---")
         for i, r in enumerate(rows):
-            summ = _refund_summary(out.iloc[i].get("agent_data"))
+            summ, refund = _refund_summary(out.iloc[i].get("agent_data"))
             print(f"  [{r['case_id']}] {summ}")
-            if r["case_id"] == "happy_refund" and "paid=500" in summ:
+            if r["case_id"] == "happy_refund" and _is_money_bug(refund):
                 money_bug_hits += 1
     print(f"\nMONEY BUG reproduced: {money_bug_hits}/{n} runs")
     return 0

@@ -35,7 +35,7 @@ financial_support/            # the ADK agent package (exposes root_agent)
 
 fraud_check_a2a/              # external fraud agent, served over A2A
 evals/                        # Case 1 eval harness (the six surfaces)
-  metrics.py                  # green CodeExecutionMetric + amber LLMMetric + local judge
+  metrics.py                  # green types.Metric (custom_function local) + amber LLMMetric + local judge
   scenarios.py                # seed eval cases (EDD) + staged fixtures
   record.py                   # record traces (agent → dataset), offline-deterministic
   eval_core.py                # score a dataset → EvalResult + gate
@@ -120,7 +120,7 @@ consumed in three places from a single definition in `contract.py`:
 | Job | Where | Code |
 |---|---|---|
 | Runtime guard | `after_tool_callback` on `issue_refund` | `callbacks/invariants.py` |
-| Test / eval metric | `CodeExecutionMetric` (green) | `evals/metrics.py` |
+| Test / eval metric | `types.Metric` custom_function local (green) | `evals/metrics.py` |
 | Merge gate | Cloud Build runs the eval on the PR | `deploy/cloudbuild.yaml` |
 
 The **LLM judge (amber)** grades tone and would happily pass a $500 refund on a

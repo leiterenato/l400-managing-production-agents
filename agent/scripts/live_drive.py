@@ -304,7 +304,13 @@ def main(argv: list[str]) -> int:
         verify=not args.no_verify,
     )
     _print(result)
-    # Non-zero exit if the money bug scenario did NOT get flagged — useful in CI.
+    # Non-zero exit only if the over-charge scenario ran but the seam did NOT
+    # flag it (a real regression) — other scenarios legitimately have no
+    # violations, so they must exit 0. Useful in CI / rehearsal smoke checks.
+    if args.scenario == "refund_over_charge" and not result.get("violations"):
+        print("\nEXPECTED an invariant violation under refund_over_charge — none "
+              "recorded. This is a regression.", file=sys.stderr)
+        return 1
     return 0
 
 

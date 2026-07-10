@@ -59,12 +59,18 @@ def main() -> int:
     import vertexai
     from vertexai import types
 
+    from financial_support.config import get_settings, reload_settings
+
+    reload_settings()  # pick up SCENARIO from .env (see evals/live.py note)
+
     from financial_support import root_agent
-    from financial_support.config import get_settings
 
     settings = get_settings()
     project = settings.project or os.environ.get("GOOGLE_CLOUD_PROJECT")
     client = vertexai.Client(project=project, location=settings.location)
+    # Always surface the active scenario — a shell SCENARIO override silently
+    # changes what this probe exercises (Fase 2 review).
+    print(f"scenario={settings.scenario} model={settings.model}")
     print(f"project={project} location={settings.location}")
 
     agent_info = types.evals.AgentInfo.load_from_agent(agent=root_agent)

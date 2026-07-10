@@ -1,4 +1,7 @@
-"""Diagnostic (reusable): DETERMINISTIC single-turn inference -> dump agent_data.
+"""Diagnostic (reusable): fixed-input single-turn inference -> dump agent_data.
+
+The INPUT is deterministic (a fixed EDD prompt set); the agent's trajectory is
+still an LLM, which is exactly why this probe exists.
 
 Shows exactly which tools the agent called for each EDD prompt, so we can see
 why the refund invariant did (or did not) fire. Cheaper than a full eval run

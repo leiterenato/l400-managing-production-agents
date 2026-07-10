@@ -10,25 +10,28 @@ which is a notebook renderer). It is guarded so it never runs by accident:
 The pipeline is the one from the demo doc, with ONE deliberate change (Fase 2):
 
     generate_conversation_scenarios   # platform generates INPUTS (shown, narrated)
-      -> run_inference                # DETERMINISTIC single-turn over EDD prompts
+      -> run_inference                # FIXED single-turn EDD prompts (deterministic INPUT)
       -> evaluate                     # our metrics: green invariant + amber judge
                                       #              + grey managed baselines
       -> generate_loss_clusters       # name the dominant failure pattern
 
-Why deterministic inference (the change): the platform's user simulator is
+Why a fixed input set (the change): the platform's user simulator is
 non-deterministic — across runs it may never steer the agent into the
 over-refund, leaving the green invariant vacuously 1.00 and the S3 payoff
 unproven. So we DECOUPLE inference from the simulator: the scored run feeds
 ``run_inference`` a fixed set of EDD-derived prompts (single-turn, no
-``user_simulator_config``), so the $500-on-$50 money bug fires on EVERY run.
-``generate_conversation_scenarios`` still runs to SHOW the platform generating
-inputs — it is just no longer on the critical path to the payoff.
+``user_simulator_config``). The *input* is deterministic; the agent's trajectory
+is still an LLM (no temperature=0), so the payoff is not mathematically
+guaranteed — but with the over-charge fault armed it reproduces reliably
+(verified 6/6 via ``scripts/flaky_check``). ``generate_conversation_scenarios``
+still runs to SHOW the platform generating inputs — it is just no longer on the
+critical path to the payoff.
 
 EDD boundary (say it on stage): the platform generates the *inputs*; the
 *criterion of correct* — the green ``refund_within_charge`` invariant — is
-derived from the contract by us. Deterministic inference makes that even
-sharper: the adversarial input itself is derived from the contract, not
-stumbled upon by a random simulator. That is the part no tool gives you.
+derived from the contract by us. The fixed input set makes that even sharper:
+the adversarial input itself is derived from the contract, not stumbled upon by
+a random simulator. That is the part no tool gives you.
 """
 
 from __future__ import annotations
@@ -116,6 +119,26 @@ def run_live() -> int:
     )
 
     settings = get_settings()
+
+    # GUARD (Fase 2 review, HIGH): the whole S3 payoff depends on the agent
+    # running under SCENARIO=refund_over_charge, so the processor over-pays and
+    # refund_within_charge goes RED. But load_dotenv above uses override=False:
+    # if the shell already exports SCENARIO (the gotcha #2 class of bug), the
+    # .env value is ignored, the fault never arms, and the invariant reports a
+    # VACUOUS green — a false-green on the payoff itself, invisible on stage.
+    # Fail loudly (and always print the active scenario) instead.
+    print(f"\nActive scenario: {settings.scenario}   model={settings.model}")
+    if settings.scenario != "refund_over_charge":
+        print(
+            f"\nSCENARIO is '{settings.scenario}', not 'refund_over_charge'.\n"
+            "The over-charge fault will NOT arm, so refund_within_charge would be\n"
+            "a vacuous green and the 'green score lies' payoff would silently\n"
+            "vanish. A stray shell 'export SCENARIO=...' overrides agent/.env.\n"
+            "  fix: `unset SCENARIO` (let .env win), or export SCENARIO=refund_over_charge",
+            file=sys.stderr,
+        )
+        return 4
+
     project = settings.project or os.environ.get("GOOGLE_CLOUD_PROJECT")
     client = vertexai.Client(project=project, location=settings.location)
 
@@ -161,11 +184,12 @@ def run_live() -> int:
     print("  The platform generates inputs; it does NOT know what 'correct' is.")
     _preview_generated_inputs(generated)
 
-    # 3) Run the real agent over a DETERMINISTIC set of EDD-derived prompts.
-    # Decoupled from the user simulator on purpose: single-turn inference (no
-    # user_simulator_config) runs the agent once per prompt, so with
-    # SCENARIO=refund_over_charge the $500-on-$50 money bug fires on EVERY run —
-    # the S3 payoff is guaranteed, not left to a non-deterministic simulator.
+    # 3) Run the real agent over a FIXED set of EDD-derived prompts (the INPUT is
+    # deterministic; the agent's trajectory is still an LLM). Decoupled from the
+    # user simulator on purpose: single-turn inference (no user_simulator_config)
+    # runs the agent once per prompt, so with SCENARIO=refund_over_charge the
+    # $500-on-$50 money bug reproduces reliably (verified 6/6 via flaky_check) —
+    # not left to a non-deterministic multi-turn simulator that may never trigger it.
     import pandas as pd
 
     from .scenarios import live_inference_rows
@@ -197,6 +221,13 @@ def run_live() -> int:
         name = getattr(m, "metric_name", None) or getattr(m, "metric", "?")
         mean = getattr(m, "mean_score", None)
         pass_rate = getattr(m, "pass_rate", None)
+        # The SDK only computes pass_rate for PREDEFINED metrics; our custom
+        # (CustomMetricHandler) and judge (LLMMetric) rows come back with
+        # pass_rate=None, which prints an ugly "None" next to the managed 100%.
+        # Our invariants are binary (score ∈ {0,1}), so mean == pass_rate — fill
+        # it in so every row reads consistently.
+        if pass_rate is None and isinstance(mean, (int, float)):
+            pass_rate = mean
         n_valid = getattr(m, "num_cases_valid", None)
         n_err = getattr(m, "num_cases_error", None)
         mean_s = f"{mean:.2f}" if isinstance(mean, (int, float)) else str(mean)

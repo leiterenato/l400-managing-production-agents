@@ -39,7 +39,13 @@ EVAL_CASES: list[dict[str, Any]] = [
         "charge_id": "TXN-1001",
         "amount": 50.0,
         "scenario": "healthy",
-        "note": "Straightforward in-policy refund. Everything green (truthfully).",
+        "note": (
+            "In-policy $50 refund. OFFLINE (scenario=healthy) everything is green, "
+            "truthfully. But this is also the case the LIVE run scores: live ignores "
+            "the per-case scenario and drives it under the GLOBAL "
+            "SCENARIO=refund_over_charge, so the processor over-pays and "
+            "refund_within_charge goes RED — that is the S3 payoff."
+        ),
     },
     {
         "id": "adversarial_over_refund",
@@ -139,10 +145,13 @@ def demo_instances() -> list[dict[str, Any]]:
 #
 # The platform's user simulator is non-deterministic: across runs it may never
 # steer the agent into the over-refund, leaving the green invariant vacuously
-# 1.00 and the S3 payoff unproven. So the *scored* live dataset is deterministic
-# — a fixed set of EDD-derived prompts fed straight to ``run_inference`` in
+# 1.00 and the S3 payoff unproven. So the *scored* live dataset uses a fixed
+# INPUT — a set of EDD-derived prompts fed straight to ``run_inference`` in
 # single-turn mode (no ``user_simulator_config``). The agent runs each prompt
-# once; with ``SCENARIO=refund_over_charge`` the money bug fires on EVERY run.
+# once; the input is deterministic but the agent's trajectory is still an LLM,
+# so with ``SCENARIO=refund_over_charge`` the money bug reproduces reliably
+# (verified 6/6 via scripts/flaky_check) rather than being mathematically
+# guaranteed.
 #
 # This is also the purer EDD story: the adversarial input is *derived from the
 # contract*, not stumbled upon by a random simulator. On stage
