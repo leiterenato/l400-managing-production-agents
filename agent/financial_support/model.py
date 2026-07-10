@@ -12,8 +12,6 @@ built from the environment — no override needed.
 
 from __future__ import annotations
 
-from functools import cached_property
-
 from google.adk.models import Gemini
 from google.genai import Client
 
@@ -28,9 +26,15 @@ class _GlobalGemini(Gemini):
 
     Only the *model* endpoint is global; project + platform services stay on the
     regional location configured elsewhere.
+
+    ``api_client`` is a plain ``@property`` (NOT ``@cached_property``) on purpose:
+    the Evaluation Service's ``run_inference`` drives the agent across multiple
+    threads/event loops, and a cached genai client gets bound to the first loop
+    ("got Future attached to a different loop"). A fresh client per access is the
+    ADK-documented remedy for that multithreaded/async contention.
     """
 
-    @cached_property
+    @property
     def api_client(self) -> Client:  # type: ignore[override]
         settings = get_settings()
         return Client(

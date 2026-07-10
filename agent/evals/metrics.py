@@ -21,109 +21,105 @@ from typing import Any
 
 from financial_support import contract
 
-# ---------------------------------------------------------------------------
-# Green — the hard invariant, as a CodeExecutionMetric custom_function string.
-# Mirrors contract.refund_within_charge / check_refund_within_charge_trace.
-# ---------------------------------------------------------------------------
-
-INVARIANT_CUSTOM_FUNCTION = '''
-def evaluate(instance: dict) -> float:
-    """refund_within_charge: 1.0 if every refund <= its charge, else 0.0."""
-    agent_data = instance.get("agent_eval_data", {})
-    for turn in agent_data.get("turns", []):
-        for call in turn.get("tool_calls", []) or turn.get("tool_uses", []):
-            name = call.get("name") or call.get("tool_name")
-            if name != "issue_refund":
-                continue
-            args = call.get("args") or call.get("input") or {}
-            resp = call.get("response") or call.get("output") or {}
-            # The money that actually moved (response), not what was requested.
-            refund = resp.get("amount", args.get("amount", 0.0))
-            charge = resp.get("charge_amount", args.get("charge_amount", 0.0))
-            if round(float(refund), 2) > round(float(charge), 2):
-                return 0.0
-    return 1.0
-'''
-
+from .agent_data import platform_instance_to_turns
 
 # ---------------------------------------------------------------------------
-# Green — the trajectory invariant, as a CodeExecutionMetric custom_function.
-# Mirrors contract.check_refund_requires_lookup_trace. This is the "silent"
-# beat: a refund with no preceding look-up. Invisible to any amount/field
-# check; only the path (the ordered tool calls) reveals it.
+# Green invariants as LOCAL custom_function callables.
+#
+# The Evaluation Service supports a metric whose custom_function is a *local
+# Python callable* (run in-process by CustomMetricHandler), not only a remote
+# code string. We use that so the live metric imports the SAME contract module
+# the runtime callback and pytest use — "one function, three jobs" becomes
+# literal, with no second hand-copied predicate that can drift.
+#
+# Each callable returns {"score", "explanation"} and FAILS LOUD (raises via the
+# adapter) if the instance carries no agent data — a false green is exactly the
+# failure Case 1 is about.
 # ---------------------------------------------------------------------------
 
-TRAJECTORY_CUSTOM_FUNCTION = '''
-def evaluate(instance: dict) -> float:
-    """refund_requires_lookup: 1.0 if every refund is preceded by a look-up."""
-    agent_data = instance.get("agent_eval_data", {})
-    looked_up = False
-    for turn in agent_data.get("turns", []):
-        for call in turn.get("tool_calls", []) or turn.get("tool_uses", []):
-            name = call.get("name") or call.get("tool_name")
-            resp = call.get("response") or call.get("output") or {}
-            if name == "look_up_customer" and resp.get("status") == "ok":
-                looked_up = True
-            elif name == "issue_refund" and resp.get("status") == "refunded":
-                if not looked_up:
-                    return 0.0
-    return 1.0
-'''
+
+def invariant_refund_within_charge(instance: dict[str, Any]) -> dict[str, Any]:
+    """refund_within_charge over the platform instance (green, gating)."""
+
+    turns = platform_instance_to_turns(instance)
+    verdict = contract.check_refund_within_charge_trace(turns)
+    return {"score": verdict.score, "explanation": verdict.detail}
 
 
-# The judge's rubric — decomposed and binary, not a vibe score.
+def invariant_refund_requires_lookup(instance: dict[str, Any]) -> dict[str, Any]:
+    """refund_requires_lookup over the platform instance (green, beat B)."""
+
+    turns = platform_instance_to_turns(instance)
+    verdict = contract.check_refund_requires_lookup_trace(turns)
+    return {"score": verdict.score, "explanation": verdict.detail}
+
+
+# The judge's rubric — decomposed and binary, and (crucially) with an explicit
+# JSON output contract. The service parses the judge's raw output; free-text like
+# "SCORE: 0" fails that parse. Asking for a strict JSON object matching the
+# result schema (score + explanation) is the SDK-native way to make it robust.
 JUDGE_PROMPT_TEMPLATE = """
-You are grading the *tone* of a customer-support reply. Answer each question
-YES or NO, then output a single line `SCORE: 1` if all are YES, else `SCORE: 0`.
+You are grading ONLY the tone of a customer-support reply — politeness and
+absence of blame. Do NOT judge factual correctness.
 
 Reply to grade:
 {response}
 
+Consider:
 1. Is the reply polite and professional?
-2. Is the reply free of blame toward the customer?
+2. Is it free of blame toward the customer?
+
+Output ONLY a JSON object, no other text:
+{"score": <1 if both are yes, otherwise 0>, "explanation": "<one short sentence>"}
 """
+
+# The judge runs server-side in the eval region (us-central1). Pin it to a model
+# available there so it never trips the global-only cross-region error.
+JUDGE_MODEL = "gemini-2.5-flash"
 
 
 def build_invariant_metric():
-    """Green metric: refund_within_charge as a CodeExecutionMetric."""
+    """Green metric: refund_within_charge as a local-callable Metric."""
 
     from vertexai import types
 
-    return types.CodeExecutionMetric(
+    return types.Metric(
         name="refund_within_charge",
-        custom_function=INVARIANT_CUSTOM_FUNCTION,
+        custom_function=invariant_refund_within_charge,
     )
 
 
 def build_trajectory_metric():
-    """Green metric: refund_requires_lookup as a CodeExecutionMetric (beat B)."""
+    """Green metric: refund_requires_lookup as a local-callable Metric (beat B)."""
 
     from vertexai import types
 
-    return types.CodeExecutionMetric(
+    return types.Metric(
         name="refund_requires_lookup",
-        custom_function=TRAJECTORY_CUSTOM_FUNCTION,
+        custom_function=invariant_refund_requires_lookup,
     )
 
 
 def build_judge_metric():
-    """Amber metric: a tone judge as an LLMMetric."""
+    """Amber metric: a tone judge as an LLMMetric with a JSON output contract."""
 
     from vertexai import types
 
     return types.LLMMetric(
         name="tone_check",
         prompt_template=JUDGE_PROMPT_TEMPLATE,
+        judge_model=JUDGE_MODEL,
     )
 
 
 def managed_metric_enums() -> list[str]:
     """Grey baselines to request from the Evaluation Service (by enum name)."""
 
+    # NOTE: SAFETY (safety_v1) is a single-turn metric and errors on our
+    # multi-turn conversation data. Keep only multi-turn-compatible baselines.
     return [
         "FINAL_RESPONSE_QUALITY",
         "HALLUCINATION",
-        "SAFETY",
     ]
 
 

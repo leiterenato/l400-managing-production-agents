@@ -48,6 +48,15 @@ def run_live() -> int:
         )
         return 3
 
+    # Load agent/.env so GOOGLE_CLOUD_PROJECT/LOCATION/MODEL are set (this module
+    # is run via `python -m`, which — unlike `adk` — does not auto-load .env).
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+    except Exception:
+        pass
+
     from financial_support import root_agent
     from financial_support.config import get_settings
 
@@ -59,20 +68,27 @@ def run_live() -> int:
     )
 
     settings = get_settings()
-    client = vertexai.Client(project=settings.project, location=settings.location)
+    project = settings.project or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    client = vertexai.Client(project=project, location=settings.location)
 
-    # 1) Register our custom metrics (green invariants + amber judge).
-    invariant = build_invariant_metric()     # types.CodeExecutionMetric (value)
-    trajectory = build_trajectory_metric()   # types.CodeExecutionMetric (path, beat B)
+    # 1) Build our metrics. The green invariants are LOCAL custom_function
+    # callables that import the contract directly (no drift), scored in-process
+    # by the SDK. Local-callable metrics are NOT registered server-side — they go
+    # straight into evaluate(). The amber judge is a server-side LLMMetric.
+    invariant = build_invariant_metric()     # local callable (value)
+    trajectory = build_trajectory_metric()   # local callable (path, beat B)
     judge = build_judge_metric()             # types.LLMMetric
-    client.evals.create_evaluation_metric(metric=invariant)
-    client.evals.create_evaluation_metric(metric=trajectory)
-    client.evals.create_evaluation_metric(metric=judge)
 
     # 2) Platform generates INPUTS (user simulation — NOT the criterion of right).
+    # NOTE: the platform's user-simulator / default eval model is a Gemini 3.x
+    # preview that lives ONLY in the global region (same split as our agent). The
+    # eval client runs regional (us-central1), so we must consent to routing the
+    # request cross-region with allow_cross_region_model=True. For regulated
+    # audiences this flag is a data-residency decision worth naming on stage.
     agent_info = types.evals.AgentInfo.load_from_agent(agent=root_agent)
     eval_dataset = client.evals.generate_conversation_scenarios(
         agent_info=agent_info,
+        allow_cross_region_model=True,
         config={
             "count": 5,
             "generation_instruction": (
@@ -86,7 +102,10 @@ def run_live() -> int:
     traces = client.evals.run_inference(
         agent=root_agent,
         src=eval_dataset,
-        config={"user_simulator_config": {"max_turn": 5}},
+        config={
+            "user_simulator_config": {"max_turn": 5},
+            "allow_cross_region_model": True,
+        },
     )
 
     # 4) Score: our custom metrics + managed baselines.
@@ -96,10 +115,44 @@ def run_live() -> int:
         metrics=[invariant, trajectory, judge, *managed],
     )
 
-    # 5) Name the dominant failure pattern.
-    clusters = client.evals.generate_loss_clusters(eval_result=result)
+    # 5) Print the per-metric summary — THIS is the S3 payoff: the hard invariant
+    # (refund_within_charge) fails on the money bug while the LLM judge
+    # (tone_check) waves it through. "The green score lies", proven live.
+    print("\n=== Evaluation summary (live) ===")
+    for m in getattr(result, "summary_metrics", None) or []:
+        name = getattr(m, "metric_name", None) or getattr(m, "metric", "?")
+        mean = getattr(m, "mean_score", None)
+        pass_rate = getattr(m, "pass_rate", None)
+        n_valid = getattr(m, "num_cases_valid", None)
+        n_err = getattr(m, "num_cases_error", None)
+        mean_s = f"{mean:.2f}" if isinstance(mean, (int, float)) else str(mean)
+        pr_s = f"{pass_rate:.0%}" if isinstance(pass_rate, (int, float)) else str(pass_rate)
+        print(f"  {name:<28} mean={mean_s:<6} pass_rate={pr_s:<6} valid={n_valid} err={n_err}")
 
-    print("Live eval submitted. See the Evaluation tab in the Cloud Console.")
-    print(f"  project={settings.project} location={settings.location}")
-    print(f"  loss clusters: {clusters}")
+    # Dump the full result to disk so we can analyze per-case offline without
+    # spending on another live run.
+    try:
+        import json as _json
+
+        with open("/tmp/eval_result.json", "w", encoding="utf-8") as fh:
+            _json.dump(result.model_dump(mode="json", exclude_none=True), fh,
+                       indent=2, default=str)
+        print("\nwrote full result -> /tmp/eval_result.json")
+    except Exception as exc:
+        print(f"\nresult dump failed: {exc}")
+
+    # 6) Name the dominant failure pattern. generate_loss_clusters is EXPERIMENTAL
+    # and fussy about the result shape; keep it best-effort so a Preview quirk
+    # never sinks the run. (Failure Clusters is really an S4 beat.)
+    print("\n=== Loss clusters (experimental) ===")
+    try:
+        clusters = client.evals.generate_loss_clusters(
+            eval_result=result, metric="refund_within_charge"
+        )
+        print(f"  {clusters}")
+    except Exception as exc:  # pragma: no cover - Preview surface
+        print(f"  (skipped: {type(exc).__name__}: {str(exc)[:160]})")
+
+    print("\nLive eval done. See the Evaluation tab in the Cloud Console.")
+    print(f"  project={project} location={settings.location}")
     return 0
