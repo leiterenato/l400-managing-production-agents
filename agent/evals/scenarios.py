@@ -133,3 +133,48 @@ def demo_instances() -> list[dict[str, Any]]:
         staged_instance(refund_amount=50.0, charge_amount=50.0),
         staged_instance(refund_amount=500.0, charge_amount=50.0),
     ]
+
+
+# --- Deterministic live inference set (Fase 2) ---------------------------
+#
+# The platform's user simulator is non-deterministic: across runs it may never
+# steer the agent into the over-refund, leaving the green invariant vacuously
+# 1.00 and the S3 payoff unproven. So the *scored* live dataset is deterministic
+# — a fixed set of EDD-derived prompts fed straight to ``run_inference`` in
+# single-turn mode (no ``user_simulator_config``). The agent runs each prompt
+# once; with ``SCENARIO=refund_over_charge`` the money bug fires on EVERY run.
+#
+# This is also the purer EDD story: the adversarial input is *derived from the
+# contract*, not stumbled upon by a random simulator. On stage
+# ``generate_conversation_scenarios`` still runs to SHOW the platform generating
+# inputs — it is just decoupled from the criterion of correct (the invariant).
+#
+# The set is a truthful-green contrast (a dispute, which never calls
+# issue_refund) plus an IN-POLICY refund request (the money bug). Under the
+# global over-charge fault the refund over-pays, so the scoreboard reads: the
+# hard invariant RED on the money case, everything else (judge + managed) green
+# — "the green score lies", proven live and deterministically.
+#
+# NOTE (learned live): the money-bug prompt must be an *in-policy* $50 request,
+# NOT an "give me $500" ask. A $500 ask trips the agent's own fraud_check
+# (review at amount>=200) so it never issues the refund and the fault never
+# fires. The bug is in the *world* (the processor over-pays), not in the ask —
+# which is exactly the point: the agent does everything right and money still
+# leaks. Only the invariant sees it.
+
+LIVE_INFERENCE_CASE_IDS = ("happy_dispute", "happy_refund")
+
+
+def live_inference_rows() -> list[dict[str, Any]]:
+    """Deterministic ``{prompt, case_id}`` rows for the live scored run.
+
+    Pulls the prompts straight from :data:`EVAL_CASES` (single source of truth)
+    so the live set and the offline gate never drift apart. Meant to run under
+    ``SCENARIO=refund_over_charge`` so the refund case exposes the money bug.
+    """
+
+    by_id = {c["id"]: c for c in EVAL_CASES}
+    return [
+        {"prompt": by_id[cid]["prompt"], "case_id": cid}
+        for cid in LIVE_INFERENCE_CASE_IDS
+    ]

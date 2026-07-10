@@ -50,6 +50,73 @@ def test_trajectory_passes_when_lookup_precedes_refund():
     assert result["score"] == 1.0
 
 
+def test_live_inference_prompts_are_in_policy():
+    """The live money-bug driver must be an IN-POLICY refund request.
+
+    Learned live (Fase 2): a "give me $500" ask trips the agent's own
+    fraud_check (review at amount>=200), so it never issues the refund and the
+    over-charge fault never fires -> the invariant stays vacuously green and the
+    payoff vanishes. The scored case must request an amount BELOW that threshold
+    so the agent proceeds and the fault (the processor over-paying) is what the
+    invariant catches.
+    """
+
+    from evals.scenarios import EVAL_CASES, live_inference_rows
+
+    _FRAUD_REVIEW_THRESHOLD = 200.0  # fraud_service.assess: review if amount>=200
+    by_id = {c["id"]: c for c in EVAL_CASES}
+    rows = live_inference_rows()
+    assert rows, "live inference set must not be empty"
+
+    refund_cases = [r for r in rows if by_id[r["case_id"]].get("flow") == "refund"]
+    assert refund_cases, "live set must contain a refund case (the money bug)"
+    for r in refund_cases:
+        amount = by_id[r["case_id"]].get("amount")
+        assert amount is not None and amount < _FRAUD_REVIEW_THRESHOLD, (
+            f"live refund case {r['case_id']} requests {amount} — at/above the "
+            "fraud review threshold it would never reach issue_refund"
+        )
+
+
+def test_over_charge_fault_triggers_money_bug_end_to_end():
+    """Under refund_over_charge the processor over-pays and the invariant fails.
+
+    Guards the whole mechanism the live payoff depends on: the fault must apply
+    (settings actually reloaded to the over-charge scenario) AND the invariant
+    must read the money that MOVED (the response), going RED on $500-on-$50.
+    """
+
+    import os
+
+    from financial_support import contract
+    from financial_support.backends import payment_processor
+    from financial_support.config import reload_settings
+
+    prev = os.environ.get("SCENARIO")
+    os.environ["SCENARIO"] = "refund_over_charge"
+    reload_settings()
+    try:
+        result = payment_processor.execute_refund(
+            customer_id="CUST-001", charge_id="TXN-1001", amount=50.0
+        )
+        assert result["amount"] == 500.0 and result["charge_amount"] == 50.0
+        turns = [
+            {
+                "tool_calls": [
+                    {"name": "issue_refund", "args": {"amount": 50.0}, "response": result}
+                ]
+            }
+        ]
+        verdict = contract.check_refund_within_charge_trace(turns)
+        assert verdict.score == 0.0
+    finally:
+        if prev is None:
+            os.environ.pop("SCENARIO", None)
+        else:
+            os.environ["SCENARIO"] = prev
+        reload_settings()
+
+
 def test_metric_fails_loud_on_placeholder():
     """A failed/placeholder run must ERROR, never score a false green."""
     placeholder = {"eval_case_id": "x", "response": {"parts": [{"text": "Missing"}]}}

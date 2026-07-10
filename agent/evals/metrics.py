@@ -75,7 +75,27 @@ Output ONLY a JSON object, no other text:
 
 # The judge runs server-side in the eval region (us-central1). Pin it to a model
 # available there so it never trips the global-only cross-region error.
+#
+# IMPORTANT (Fase 2): the Evaluation Service rejects a bare model name for the
+# judge's autorater — it wants a *resource name* ("Invalid autorater model
+# resource name" / 400). Build the fully-qualified publisher path.
 JUDGE_MODEL = "gemini-2.5-flash"
+
+
+def _judge_model_resource_name(project: str | None, location: str) -> str:
+    """Fully-qualified autorater model resource name for the judge (LLMMetric).
+
+    The Evaluation Service's ``judge_autorater_config.autorater_model`` requires
+    a resource name, not a bare id like ``gemini-2.5-flash``.
+    """
+
+    loc = location or "us-central1"
+    if project:
+        return (
+            f"projects/{project}/locations/{loc}"
+            f"/publishers/google/models/{JUDGE_MODEL}"
+        )
+    return f"publishers/google/models/{JUDGE_MODEL}"
 
 
 def build_invariant_metric():
@@ -100,23 +120,32 @@ def build_trajectory_metric():
     )
 
 
-def build_judge_metric():
-    """Amber metric: a tone judge as an LLMMetric with a JSON output contract."""
+def build_judge_metric(project: str | None = None, location: str = "us-central1"):
+    """Amber metric: a tone judge as an LLMMetric with a JSON output contract.
+
+    ``project``/``location`` build the autorater's fully-qualified model resource
+    name (the service rejects a bare model id).
+    """
 
     from vertexai import types
 
     return types.LLMMetric(
         name="tone_check",
         prompt_template=JUDGE_PROMPT_TEMPLATE,
-        judge_model=JUDGE_MODEL,
+        judge_model=_judge_model_resource_name(project, location),
     )
 
 
 def managed_metric_enums() -> list[str]:
     """Grey baselines to request from the Evaluation Service (by enum name)."""
 
-    # NOTE: SAFETY (safety_v1) is a single-turn metric and errors on our
-    # multi-turn conversation data. Keep only multi-turn-compatible baselines.
+    # These are SINGLE-TURN managed metrics. That is correct here: the live
+    # pipeline runs DETERMINISTIC single-turn inference (see evals/live.py), so
+    # the scored data is single-turn and these baselines apply cleanly. (They
+    # errored earlier only because the data was multi-turn user-simulation.)
+    # Confirmed live: both run green on the money bug — a grey baseline waves the
+    # over-refund through just like the tone judge does; only the hard invariant
+    # catches it.
     return [
         "FINAL_RESPONSE_QUALITY",
         "HALLUCINATION",

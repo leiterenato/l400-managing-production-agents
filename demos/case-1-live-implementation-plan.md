@@ -94,19 +94,43 @@ USE_A2A_FRAUD=true uv run --env-file deploy/opentelemetry.env adk web --otel_to_
   `demos/case-1-demos.md §3.3`, "Atributos de span obrigatórios").
 - **Palco:** declarar Topology = Preview.
 
-### Fase 2 — S3 live eval (Evaluation Preview) · precisa creds · ⚠️ MAIOR RISCO
+### Fase 2 — S3 live eval (Evaluation Preview) · ✅ FEITA (2026-07-10)
 ```bash
 EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
 ```
-- Valida a pipeline Preview: `generate_conversation_scenarios` → `run_inference` →
-  `evaluate` → `generate_loss_clusters`. Resultados na **aba Evaluation** do Console.
-- **Risco:** drift de assinatura das APIs Preview (o SDK muda). A investigação de
-  2026-07-09 não confirmou os nomes exatos direto da página de overview — validar
-  contra as subpáginas do SDK ("Manage evaluation metrics", "Continuous evaluation").
-- **Fallback:** se a API live quebrar, o **gate offline** (`run_offline` sem `--live`)
-  é o artefato mostrado — já é determinístico e verde. Não bloqueia a demo.
+- **Payoff PROVADO ao vivo.** Scoreboard real (2 casos determinísticos):
+  `refund_within_charge mean=0.50` (dispute verde, refund **0.0 → OVER-REFUND
+  $500 sobre $50**) enquanto `tone_check=1.00` e `final_response_quality=1.00`
+  passam. "The green score lies", determinístico e repetível.
+- **Decisão-chave (desacoplar do simulador):** o simulador de usuário é
+  não-determinístico e às vezes nunca dispara o over-refund → invariante ficava
+  vacuamente 1.00. Agora o `run_inference` roda sobre um **dataset determinístico
+  EDD** (single-turn, SEM `user_simulator_config`) — o bug do dinheiro dispara em
+  TODA rodada. `generate_conversation_scenarios` continua no palco (mostrar
+  "plataforma gera inputs"), mas **desacoplado** do caminho pontuado.
+- **Gotcha #1 — o pedido tem que ser em-política:** um prompt "give me $500"
+  tropeça no `fraud_check` do próprio agente (review em amount≥200) → nunca emite
+  refund. O caso pontuado pede **$50** (em-política) e o **fault** (`over_charge_
+  multiplier`) é quem over-paga. O bug está no *mundo*, não no pedido — e é esse o
+  ponto. Guardado por `tests/test_live_metrics.py::test_live_inference_prompts_are_in_policy`.
+- **Gotcha #2 — cache de settings antes do `.env`:** `import evals.run_offline`
+  toca `get_settings()` e cacheia `SCENARIO=healthy` (shell) ANTES do `load_dotenv`
+  → o fault não aplicava. Fix: `reload_settings()` no `live.py` após o load.
+  Guardado por `...::test_over_charge_fault_triggers_money_bug_end_to_end`.
+- **Gotcha #3 — juiz (`LLMMetric`):** `judge_model` exige **resource name
+  completo** (`projects/…/locations/…/publishers/google/models/gemini-2.5-flash`);
+  nome nu dá 400 "Invalid autorater model resource name". Ver
+  `evals/metrics.py::_judge_model_resource_name`.
+- **Managed single-turn** (`FINAL_RESPONSE_QUALITY`, `HALLUCINATION`) agora rodam
+  (erravam antes só por serem dados multi-turn). Bônus: hallucination pegou que a
+  resposta diz "$50" mas $500 saiu (0.83).
+- **loss_clusters:** ainda "no response" com 2 casos — experimental, é beat de S4;
+  best-effort, não bloqueia.
+- **Fallback:** o **gate offline** (`run_offline` sem `--live`) continua o artefato
+  determinístico/verde se a API Preview quebrar no dia. 40 testes verdes.
 - **Fronteira EDD (dizer no palco):** a plataforma gera os *inputs*; o *critério de
-  certo* (o invariante) veio do contrato. Ver `demos/case-1-demos.md §4`.
+  certo* (o invariante) veio do contrato. Determinismo deixa isso ainda mais nítido:
+  o input adversarial também sai do contrato. Ver `demos/case-1-demos.md §4`.
 
 ### Fase 3 — Agent Runtime deploy (a "produção") · precisa creds + bucket
 ```bash
