@@ -140,14 +140,61 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
   certo* (o invariante) veio do contrato. Determinismo deixa isso ainda mais nítido:
   o input adversarial também sai do contrato. Ver `demos/case-1-demos.md §4`.
 
-### Fase 3 — Agent Runtime deploy (a "produção") · precisa creds + bucket
+### Fase 3 — Agent Runtime deploy (a "produção") · ✅ FEITA (2026-07-10)
 ```bash
-GOOGLE_CLOUD_STAGING_BUCKET=gs://<seu-bucket> \
+# .env NÃO é auto-carregado por este script — passar as vars no comando:
+GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID GOOGLE_CLOUD_LOCATION=us-central1 \
+  GOOGLE_CLOUD_STAGING_BUCKET=gs://YOUR_PROJECT_ID-agent-staging \
+  GOOGLE_GENAI_USE_VERTEXAI=true MODEL=gemini-3.5-flash CASE=1 \
   DEPLOY_CONFIRM=1 uv run python deploy/agent_engine.py
 ```
-- Cria o `ReasoningEngine` (Agent Runtime). Confirmar traces fluindo para Cloud Trace.
-- É a "produção" que o S4 aponta. **NÃO demonstrar o deploy ao vivo** (cold start) —
-  pré-deployar e mostrar o Console.
+- **PROVADO ao vivo:** `ReasoningEngine` deployado e **servindo tráfego** (via
+  `eng.stream_query`), com a trajetória multi-agente real em produção. **Traces do
+  agente deployado aparecem no Cloud Trace de PROJETO E na aba Traces escopada ao
+  agente** (Trace Explorer / `ListTraces` / console tab), com a seam EDD:
+  `invoke_workflow → invoke_agent → call_llm → execute_tool {look_up_customer,
+  transfer_to_agent, fraud_check, issue_refund} → refund_specialist`, labels
+  `eval.invariant.refund_within_charge / refund_after_fraud_decision /
+  read_targets_session_customer`.
+- **Superfície de palco:** a aba Traces do agente OU o Trace Explorer de projeto (ambos
+  têm a seam; ver #5). **NÃO demonstrar o deploy ao vivo** (cold start) — pré-deployar e
+  mostrar o Console.
+
+**5 fixes reais (em `deploy/agent_engine.py` + `pyproject.toml`):**
+1. **`cloudpickle` faltando** → extra `agent-engines`:
+   `google-cloud-aiplatform[evaluation,agent-engines]` no `pyproject.toml` (+`uv sync`).
+2. **`No module named 'financial_support'`** no startup → `extra_packages=["financial_support"]`
+   no `create()` (o pickle referencia código que não era enviado).
+3. **`enable_tracing=True` deprecado** → `AdkApp(agent=...)` + env vars documentadas:
+   `GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY=true`,
+   `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental`,
+   `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=EVENT_ONLY` (NÃO `true`),
+   `ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=false`.
+4. **Só as 3 env vars documentadas de tracing são necessárias** (ver #3). NÃO setar
+   `OTEL_RESOURCE_ATTRIBUTES=gcp.project_id` — é desnecessário (o template resolve
+   número→id do projeto via Resource Manager no `set_up`, então `gcp.project_id` sai certo)
+   e foi um workaround para um `400` cuja causa real era outra (ver #5).
+5. **CAUSA RAIZ da aba vazia (RESOLVIDO — não era Preview):** era o NOSSO
+   `financial_support/observability/otel.py::init_telemetry()` chamado **no import** do
+   agente (`agent.py`), que fazia `set_tracer_provider()` com um Resource pobre
+   (`service.name="financial-support-agent"`, sem `cloud.resource_id`). O import roda
+   ANTES do `set_up()` do runtime → nosso provider ganhava a corrida; o template então só
+   adicionava o exporter ao provider errado. Spans exportavam com `service.name=display_name`
+   → a aba (que filtra por `service.name=<engine id>`/`cloud.resource_id`) ficava vazia.
+   **Fix:** removido o `init_telemetry()` automático no import + guard de runtime gerenciado
+   em `otel.py`. **Provado ao vivo:** pós-fix os spans têm `service.name=<engine id>` +
+   `cloud.resource_id=//aiplatform.../reasoningEngines/<id>` e a aba popula.
+
+**Superfície de palco:** com a aba do agente FUNCIONANDO, dá pra mostrar a aba Traces
+escopada ao agente OU o Trace Explorer de projeto (ambos têm a seam). Local do S2 continua
+como fallback (decisão travada).
+
+- **Verdades-base do probe (custom engine que dumpa `os.environ`+Resource; já deletado):**
+  `GOOGLE_CLOUD_AGENT_ENGINE_ID` **está presente no `set_up`** (só `None` no `__init__` —
+  a teoria "não populado a tempo" era falsa); plataforma **não injeta `OTEL_SERVICE_NAME`**;
+  `OTEL_RESOURCE_ATTRIBUTES=gcp.project_id` **não** sobrescreve `service.name`. Diagnóstico
+  do 400: replicar `google/adk/telemetry/google_cloud.py::_get_gcp_span_exporter` + POST à
+  mão (`AuthorizedSession`+`encode_spans().SerializeToString()`).
 - **Honestidade:** Runtime dá as superfícies de observabilidade (mesmo OTel→Trace),
   **não** dá métricas de qualidade nem custo de graça. Os invariantes são SUA
   instrumentação — é o ponto do EDD.

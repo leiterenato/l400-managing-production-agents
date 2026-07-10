@@ -17,15 +17,22 @@ from google.adk.agents import LlmAgent
 
 from .callbacks import assemble
 from .model import build_model
-from .observability import init_telemetry
 from .prompts import ROOT_INSTRUCTION
 from .sub_agents import build_disputes_agent, build_refund_agent
 from .tools import look_up_customer
 
 
 def build_root_agent() -> LlmAgent:
-    # Bring up telemetry substrate (no-op if disabled / already running).
-    init_telemetry()
+    # Telemetry is owned by the *runtime*, so we deliberately do NOT install a
+    # provider here. This module is imported before the runtime's own telemetry
+    # set_up runs (Agent Runtime unpickles/imports the agent, THEN calls
+    # set_up; `adk web` imports the agent, THEN configures OTel). If we called
+    # observability.init_telemetry() at import it would win that race and pin a
+    # bare service.name="financial-support-agent" Resource onto the global
+    # provider — which shadows the canonical Agent Engine Resource
+    # (service.name=<engine id> + cloud.resource_id) and silently empties the
+    # agent-scoped console Traces tab. Local bare runs that want console spans
+    # call observability.init_telemetry() explicitly (it no-ops on a runtime).
 
     return LlmAgent(
         name="financial_support",

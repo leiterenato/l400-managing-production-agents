@@ -78,20 +78,57 @@ def deploy() -> int:
 
     from financial_support import root_agent
 
-    # enable_tracing=True -> OTel spans to Cloud Trace (the same seam as local).
-    app = reasoning_engines.AdkApp(agent=root_agent, enable_tracing=True)
+    # Tracing config below follows Google's Agent Runtime tracing guide. Do NOT
+    # use the deprecated `enable_tracing` flag (it forces
+    # ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=true -> oversized span attributes).
+    app = reasoning_engines.AdkApp(agent=root_agent)
 
-    remote = agent_engines.create(
-        agent_engine=app,
+    common = dict(
         display_name="financial-support-agent",
         description="L400 reference agent (Case 1). Managed runtime for the "
         "S4 flywheel: production traces feed the online monitor.",
         requirements=REQUIREMENTS,
-        # Keep the demo scoped to Case 1 in production too.
-        env_vars={"CASE": os.environ.get("CASE", "1")},
+        # Ship our source: the pickled agent references the local
+        # `financial_support` package, so the container needs its code too
+        # (otherwise it starts up with "No module named 'financial_support'").
+        extra_packages=["financial_support"],
+        env_vars={
+            # Keep the demo scoped to Case 1 in production too.
+            "CASE": os.environ.get("CASE", "1"),
+            # Documented ADK tracing env vars (the replacement for enable_tracing).
+            # These three are all that's needed: the platform's own telemetry
+            # set_up() then builds the CANONICAL OTel Resource
+            # (service.name=<engine id> + cloud.resource_id=.../reasoningEngines/
+            # <engine id>), which is what scopes spans to the agent-scoped
+            # console Traces / Topology / Sessions tabs.
+            "GOOGLE_CLOUD_AGENT_ENGINE_ENABLE_TELEMETRY": "true",
+            "OTEL_SEMCONV_STABILITY_OPT_IN": "gen_ai_latest_experimental",
+            "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "EVENT_ONLY",
+            "ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS": "false",
+            # NOTE: do NOT set OTEL_RESOURCE_ATTRIBUTES=gcp.project_id here. It is
+            # unnecessary — the template resolves the project number to the
+            # project id via the Resource Manager API at set_up time (verified by
+            # probe: gcp.project_id lands as the id, spans export 200). It is also
+            # a trap: an earlier attempt added it to fix a 400 that was really
+            # caused by our own financial_support.observability.init_telemetry()
+            # racing ahead of the platform at import and pinning a bare
+            # service.name="financial-support-agent" Resource. That is now fixed
+            # in the agent (init_telemetry no longer auto-runs), so the canonical
+            # resource wins and the agent-scoped tabs populate.
+        },
     )
 
-    print("Deployed to Agent Runtime (Agent Engine).")
+    # Update an existing engine in place (preserves the engine id the demo and
+    # console tabs reference) when UPDATE_RESOURCE is set; otherwise create new.
+    update_resource = os.environ.get("UPDATE_RESOURCE")
+    if update_resource:
+        remote = agent_engines.update(
+            update_resource, agent_engine=app, **common
+        )
+        print("Updated Agent Runtime (Agent Engine) in place.")
+    else:
+        remote = agent_engines.create(agent_engine=app, **common)
+        print("Deployed to Agent Runtime (Agent Engine).")
     print(f"  resource: {remote.resource_name}")
     print("  Traces -> Cloud Trace; the Online Monitor samples them (S4).")
     return 0
