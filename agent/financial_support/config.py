@@ -59,6 +59,13 @@ class Settings:
     telemetry_enabled: bool
     otel_to_cloud: bool
 
+    # --- Verdict audit log (S4 flywheel: Cloud Logging -> BigQuery) ------
+    # When on, the invariant seam emits a structured LogEntry per verdict; a
+    # Cloud Logging -> BigQuery sink lands it in `audit_log_name`. Off by default
+    # so offline/pytest never touch GCP. See observability/verdict_log.py.
+    audit_log_enabled: bool
+    audit_log_name: str
+
     # --- Invariant seam (Case 1) ----------------------------------------
     # "observe": record the violation on the span + session state but let the
     #   (wrong) tool result stand -> the eval is what catches it later. This is
@@ -82,6 +89,8 @@ class Settings:
             case=int(_env_str("CASE", "1")),
             telemetry_enabled=_env_bool("TELEMETRY_ENABLED", True),
             otel_to_cloud=_env_bool("OTEL_TO_CLOUD", False),
+            audit_log_enabled=_env_bool("EVAL_AUDIT_LOG", False),
+            audit_log_name=_env_str("EVAL_AUDIT_LOG_NAME", "agent_spans_live"),
             invariant_enforcement=_env_str("INVARIANT_ENFORCEMENT", "observe"),
             fraud_agent_url=_env_str(
                 "FRAUD_AGENT_URL", "http://localhost:8001"

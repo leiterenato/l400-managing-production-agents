@@ -199,29 +199,69 @@ como fallback (decisão travada).
   **não** dá métricas de qualidade nem custo de graça. Os invariantes são SUA
   instrumentação — é o ponto do EDD.
 
-### Fase 4 — S4 pré-semeado (híbrido) · construção + creds
-- **BigQuery (o item de build real):** — **✅ schema + seeder RECONCILIADOS sem creds (2026-07-09).**
-  1. ~~Reconciliar o schema~~ **FEITO.** Raiz descoberta: spans OTel vão pro Cloud
-     Trace, que **não tem export nativo p/ BQ** → caminho GA = **Cloud Logging → BQ
-     sink** de uma **log entry estruturada** espelhando o verdict. A query foi
-     reescrita p/ o schema **LogEntry/jsonPayload** real (`jsonPayload.invariant_passed`,
-     `jsonPayload.tool_name`), não mais o atributo pontuado inexistente. Schema da
-     tabela em `evals/queries/agent_spans_schema.json` (validado contra o SDK real do
-     BQ, `SchemaField.from_api_repr`).
-  2. ~~Escrever o seeder~~ **FEITO.** `bigquery_scale.py` ganhou `synthetic_rows()`
-     (corpus expandido em linhas LogEntry, semanas alinhadas ao domingo p/ casar com
-     `DATE_TRUNC(..,WEEK)`), `weekly_from_rows()` (re-agrega igual à SQL) e
-     `seed_bigquery()` (cria dataset+tabela particionada e faz `load_table_from_json`,
-     guardado). +7 testes (34 verdes à época; 46 hoje) provam que o corpus re-agrega no
-     `weekly_failure_rate()`. Inspeção offline: `python -m evals.bigquery_scale --dump`.
-  3. **Com creds (falta):** criar o **sink Cloud Logging → BigQuery** de verdade
-     (ou usar o seeder), **semear** e validar. Só o passo que precisa de GCP.
-  4. Semear: `EVAL_LIVE_CONFIRM=1 python -m evals.bigquery_scale --seed` (anchor=hoje);
-     conferir: `EVAL_LIVE_CONFIRM=1 python -m evals.bigquery_scale --live`.
-- **Online Monitor:** manter `evals/online_monitor.py` como a view **semeada** (janela
-  deslizante + alerta), com framing honesto ("stream semeado de um ambiente real").
-  Opcional: apontar para a aba Evaluation (online monitors) do agente deployado se
-  existir. Cloud Monitoring alert policy é GA (ver `demos/case-1-demos.md §3.3`).
+### Fase 4 — S4 pré-semeado (híbrido) · ✅ FEITA (2026-07-10) — pipe REAL ponta-a-ponta
+**Provado ao vivo:** corpus semeado + trend query real + **LogEntry do agente real →
+Cloud Logging → sink → BigQuery**. Duas tabelas em `agent_eval` (decisão travada):
+`agent_spans` (12 sem. semeadas, a query lê esta) e `agent_spans_live` (dona do sink,
+1 linha REAL do refund ao vivo). 54 testes verdes; emissão OFF por padrão.
+
+**Código (novo/alterado):**
+- `financial_support/observability/verdict_log.py` (novo): `_build_payload` (puro) +
+  `emit_verdict` (guardado por `EVAL_AUDIT_LOG`, lazy import, no-op/swallow — igual ao
+  padrão `otel.py`/`telemetry.py`). Log id = `EVAL_AUDIT_LOG_NAME` (default
+  `agent_spans_live`).
+- `callbacks/invariants.py`: `_record(ctx, tool.name, verdict)` chama `emit_verdict`
+  (roda p/ TODO verdict — pass e fail — p/ o denominador do corpus).
+- `config.py`: `audit_log_enabled` (`EVAL_AUDIT_LOG`, default False) + `audit_log_name`.
+- `pyproject.toml` + `deploy/agent_engine.py`: dep `google-cloud-logging`; engine
+  `env_vars` ganham `EVAL_AUDIT_LOG=true` + `EVAL_AUDIT_LOG_NAME` (deploys FUTUROS
+  emitem; o engine já vivo `ENGINE_ID_CASE1` **não** emite — precede a mudança).
+- **BUG achado e corrigido:** `bigquery_scale.py::run_bigquery` rodava o `.sql` com o
+  placeholder literal `PROJECT.DATASET.agent_spans` → agora substitui por
+  `{project}.{_DATASET}.{_TABLE}` antes do `client.query`. Sem isso o `--live` errava.
+- `online_monitor.py`: framing "seeded from a real environment" (sem mudar lógica).
+
+**Comandos (rodados, do `agent/`):**
+```
+# 1) Semear + validar o corpus histórico (drift):
+EVAL_LIVE_CONFIRM=1 GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID \
+  GOOGLE_CLOUD_LOCATION=us-central1 uv run python -m evals.bigquery_scale --seed
+EVAL_LIVE_CONFIRM=1 GOOGLE_CLOUD_PROJECT=... GOOGLE_CLOUD_LOCATION=us-central1 \
+  uv run python -m evals.bigquery_scale --live      # 0.2% chapado → 3.2% (drift)
+# 2) Sink Logging→BQ (Owner-only, ver gotcha):
+gcloud logging sinks create agent-spans-live-bq \
+  bigquery.googleapis.com/projects/YOUR_PROJECT_ID/datasets/agent_eval \
+  --log-filter='logName="projects/YOUR_PROJECT_ID/logs/agent_spans_live"' \
+  --use-partitioned-tables
+# 3) Landar 1 linha real: dirigir refund ao vivo com emissão on:
+EVAL_AUDIT_LOG=true uv run python -m scripts.live_drive \
+  --scenario refund_over_charge --no-cloud --no-verify
+# 4) Verificar em BQ:
+bq query --use_legacy_sql=false \
+  'SELECT severity, jsonPayload FROM `YOUR_PROJECT_ID.agent_eval.agent_spans_live` \
+   WHERE jsonPayload.invariant_name="refund_within_charge"'
+# → ERROR / issue_refund / passed=false / refund=500 / charge=50 ✅
+```
+
+**Gotchas reais (novos):**
+- **Sink create = Owner-only.** `roles/editor` **NÃO** tem `logging.sinks.create` (é de
+  `logging.configWriter`/`admin`). Mesma classe do bootstrap da Fase 0. O usuário
+  concedeu **Logging Admin** à SA runtime p/ prosseguir. O **grant do writer identity**
+  (`service-<num>@gcp-sa-logging.iam.gserviceaccount.com`) **eu consigo fazer**: dei
+  `WRITER` no **nível do dataset** (a SA é OWNER do dataset `agent_eval`) — evita o
+  project `setIamPolicy` (que exige Owner).
+- **Latência de propagação de IAM:** o 1º lote de entries emitido logo após o grant do
+  writer **não** aterrissou (a tabela nem foi criada por ~9min); re-dirigir 1 refund
+  depois da propagação → tabela criada + linhas em ~55s. Sink→BQ 1º flush leva minutos.
+- **Tipo na tabela do sink:** `jsonPayload.invariant_passed` vira **STRING** (`"false"`)
+  na `agent_spans_live` (auto-schema do sink) — por isso o desenho de 2 tabelas está
+  certo: a trend query só toca a `agent_spans` semeada (BOOLEAN de verdade).
+- **Opcional (origem "produção"):** update in-place do engine p/ ele emitir também:
+  `UPDATE_RESOURCE=<resource> EVAL_AUDIT_LOG=true DEPLOY_CONFIRM=1 ... uv run python
+  deploy/agent_engine.py` (as env vars já estão no script). Não bloqueia — o `live_drive`
+  já é o agente REAL.
+- **Online Monitor:** view **semeada** (`online_monitor.py`), framing honesto; Cloud
+  Monitoring alert policy é GA.
 - **Ponte C3 (1 frase):** o mesmo BQ ganha Row-Level Security no Caso 3.
 
 ### Fase 5 — Cloud Build gate · usuário conecta o repo

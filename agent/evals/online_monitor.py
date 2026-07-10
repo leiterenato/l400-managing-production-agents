@@ -1,14 +1,19 @@
 """Online monitor — the same invariant, watching production 24/7 (S4).
 
-Offline simulation of the platform's continuous eval: the ``OnlineEvaluator``
-samples a fraction of production traces (~every 10 min), scores them with the
-*same* invariant, writes to Cloud Logging + Cloud Monitoring, and a Cloud
-Monitoring alert policy fires when the score drops below a threshold.
+A **seeded view of a real environment**: the platform's online evaluator samples
+a fraction of production traces (~every 10 min), scores them with the *same*
+invariant, writes to Cloud Logging + Cloud Monitoring, and a Cloud Monitoring
+alert policy fires when the score drops below a threshold. The verdict entries
+are real (see ``financial_support/observability/verdict_log.py`` — the deployed
+agent emits them, and the Logging -> BigQuery sink lands them). What we *can't*
+generate on stage is weeks of drift, so this module replays a seeded stream that
+drifts on cue, showing the rolling invariant pass-rate trip the alert.
 
 Honesty for the stage: the alert **notifies only** (Slack / email / PubSub). It
-does not gate — the gate is Cloud Build at merge time. Here we simulate a stream
-whose quality drifts, and show the rolling invariant pass-rate tripping the
-alert. Deterministic (index-driven, no randomness) so the demo repeats exactly.
+does not gate — the gate is Cloud Build at merge time. And the drift here is
+seeded from a real environment, not fabricated live. Deterministic (index-driven,
+no randomness) so the demo repeats exactly. The live counterpart is the deployed
+agent's Evaluation (online monitors) tab.
 """
 
 from __future__ import annotations
@@ -66,7 +71,7 @@ def run_monitor(
 def render(events: list[MonitorEvent], threshold: float = 0.9) -> str:
     lines = [
         "Online monitor — refund_within_charge over a production stream",
-        f"(sampling window; alert threshold = {threshold:.0%}, notify-only)",
+        f"(seeded from a real environment; alert threshold = {threshold:.0%}, notify-only)",
         "=" * 64,
     ]
     for e in events:

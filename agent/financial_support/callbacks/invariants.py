@@ -26,11 +26,17 @@ from google.adk.tools.base_tool import BaseTool
 
 from .. import contract
 from ..config import get_settings
+from ..observability import verdict_log
 from . import telemetry
 
 
-def _record(tool_context: ToolContext, verdict: contract.Verdict) -> None:
+def _record(
+    tool_context: ToolContext, tool_name: str, verdict: contract.Verdict
+) -> None:
     telemetry.record_invariant(verdict)
+    # Durable side of the seam: mirror the verdict to Cloud Logging so the
+    # Logging -> BigQuery sink can build the S4 corpus (no-op unless enabled).
+    verdict_log.emit_verdict(tool_name, verdict)
     violations = tool_context.state.get("invariant_violations", [])
     if not verdict.passed:
         violations = violations + [
@@ -100,7 +106,7 @@ def enforce_invariants(
         if verdict is None:
             continue
 
-        _record(tool_context, verdict)
+        _record(tool_context, tool.name, verdict)
 
         if not verdict.passed and blocking:
             # Refuse the action and hand the model a structured error it can relay.

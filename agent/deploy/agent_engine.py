@@ -38,6 +38,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 REQUIREMENTS = [
     "google-adk[a2a]>=2.3.0",
     "google-cloud-aiplatform[agent-engines]>=1.159.0",
+    # The seam emits verdict LogEntries via the Cloud Logging client (S4 sink).
+    "google-cloud-logging>=3.11.0",
 ]
 
 
@@ -95,6 +97,13 @@ def deploy() -> int:
         env_vars={
             # Keep the demo scoped to Case 1 in production too.
             "CASE": os.environ.get("CASE", "1"),
+            # S4 flywheel: the deployed agent emits verdict LogEntries so the
+            # Cloud Logging -> BigQuery sink builds the durable corpus. Off by
+            # default in code; turned on here for the "production" origin.
+            "EVAL_AUDIT_LOG": os.environ.get("EVAL_AUDIT_LOG", "true"),
+            "EVAL_AUDIT_LOG_NAME": os.environ.get(
+                "EVAL_AUDIT_LOG_NAME", "agent_spans_live"
+            ),
             # Documented ADK tracing env vars (the replacement for enable_tracing).
             # These three are all that's needed: the platform's own telemetry
             # set_up() then builds the CANONICAL OTel Resource

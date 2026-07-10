@@ -32,6 +32,7 @@ financial_support/            # the ADK agent package (exposes root_agent)
     telemetry.py              # OTel span enrichment
     registry.py               # ★ compose bundles per concern (extensibility spine)
   observability/otel.py       # OTel substrate (always on)
+  observability/verdict_log.py# S4: emit verdict LogEntry → Cloud Logging → BQ sink
 
 fraud_check_a2a/              # external fraud agent, served over A2A
 evals/                        # Case 1 eval harness (the six surfaces)
@@ -91,6 +92,14 @@ EVAL_LIVE_CONFIRM=1 uv run python -m evals.run_offline --live
 # 7) OPTIONAL: deploy to Agent Runtime (managed production; do NOT demo live):
 GOOGLE_CLOUD_STAGING_BUCKET=gs://your-bucket \
   DEPLOY_CONFIRM=1 uv run python deploy/agent_engine.py
+
+# 8) S4 flywheel corpus (needs GCP + confirm): seed the months of drift, then
+#    validate the real trend query against BigQuery:
+EVAL_LIVE_CONFIRM=1 uv run python -m evals.bigquery_scale --seed
+EVAL_LIVE_CONFIRM=1 uv run python -m evals.bigquery_scale --live
+#    The live pipe (real rows): set EVAL_AUDIT_LOG=true so the seam emits a
+#    verdict LogEntry (log id `agent_spans_live`); a Cloud Logging → BigQuery
+#    sink lands it in `agent_eval.agent_spans_live`. See deploy notes below.
 ```
 
 > **Agent Runtime placement.** It's the managed host + the honest home of

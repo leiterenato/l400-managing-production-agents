@@ -256,6 +256,11 @@ def run_bigquery(project: str | None = None) -> int:
         query = fh.read()
 
     client = bigquery.Client(project=project)
+    # The .sql keeps a `PROJECT.DATASET.agent_spans` placeholder (documents the
+    # shape); point it at the real seeded table before running.
+    query = query.replace(
+        "PROJECT.DATASET.agent_spans", f"{client.project}.{_DATASET}.{_TABLE}"
+    )
     for row in client.query(query).result():
         print(dict(row))
     return 0

@@ -547,6 +547,7 @@ dependencies = [
     { name = "a2a-sdk", extra = ["http-server"] },
     { name = "google-adk", extra = ["a2a"] },
     { name = "google-cloud-aiplatform", extra = ["agent-engines", "evaluation"] },
+    { name = "google-cloud-logging" },
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-resourcedetector-gcp" },
 ]
@@ -561,6 +562,7 @@ requires-dist = [
     { name = "a2a-sdk", extras = ["http-server"], specifier = ">=0.3.26" },
     { name = "google-adk", extras = ["a2a"], specifier = ">=2.3.0" },
     { name = "google-cloud-aiplatform", extras = ["evaluation", "agent-engines"], specifier = ">=1.159.0" },
+    { name = "google-cloud-logging", specifier = ">=3.11.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = "==1.42.1" },
     { name = "opentelemetry-resourcedetector-gcp", specifier = ">=1.12.0a0" },
 ]
