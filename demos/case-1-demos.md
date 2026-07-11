@@ -436,6 +436,36 @@ a métrica custom (`types.Metric` com `custom_function` local) espelhada em
 
 ---
 
+## AgentFlux & escopo do EDD na demo (decisões 2026-07-11)
+
+**Contexto:** o AgentFlux (ferramenta interna: lê a fonte do agente → profiles →
+CUJs → `trajectory_eval_set.json` + `simulation_eval_set.json` + `*_eval_config.json`)
+é o **motor da derivação contrato→eval** — mas **NÃO gera invariantes** (fica na
+geração de casos/dataset/config; a constraint dura `refund ≤ charge` é curada à mão).
+
+**Decisões (fechadas):**
+1. **Invariante = herói, AO VIVO.** Conceito + falha + pass/fail ao vivo (scoreboard
+   3 cores, trace `eval.invariant.*`, eval S3 "green lies", gate, BQ trend). Núcleo
+   mais forte, já provado.
+2. **AgentFlux = comentar + mostrar OUTPUT** (não rodar ao vivo), no **Slide 3 /
+   demo pt.1**, enquadrado como *"os `EVAL_CASES` podem ser gerados da análise do
+   próprio agente → mata o cold-start"*.
+3. **Criar um `.json` simulando a saída do AgentFlux** como exemplo ilustrativo
+   (mostrar + comentar) — TODO da próxima sessão. Guardar em `demos/` ou
+   `agent/evals/samples/`, coerente com os `EVAL_CASES` reais.
+4. **Audiência com externos (Accenture):** AgentFlux é interno → não fazer o talk
+   depender dele; usá-lo como **evidência** ("rodamos isso na escala"); a técnica
+   portável (EDD) + saída no **ADK Eval** é o que o FDE leva.
+5. **Golden-trajectory vs invariante = camadas** (regressão vs correção), não rivais.
+   O invariante é o herói DESTE agente porque golden-de-trajetória dá falso-verde no
+   bug de valor.
+6. **Flywheel writeback (cluster → caso novo): não agora** — narrar/pré-gravar.
+
+Detalhes conceituais (invariante vs juiz/gabarito, escada de confiança) e próximos
+passos na memória `edd-agentflux-narrative`.
+
+---
+
 ## Referências
 - Doc pública: `docs.cloud.google.com/gemini-enterprise-agent-platform/optimize`
   (Evaluation + Observability) + guia OTel ADK (`stackdriver/docs/instrumentation/ai-agent-adk`).
