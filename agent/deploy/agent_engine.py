@@ -97,6 +97,11 @@ def deploy() -> int:
         env_vars={
             # Keep the demo scoped to Case 1 in production too.
             "CASE": os.environ.get("CASE", "1"),
+            # Fault profile the DEPLOYED agent runs under. Default healthy; arm
+            # with SCENARIO=refund_over_charge so a real refund over-pays ($500
+            # on a $50 charge) and the invariant goes RED on the agent tab.
+            # Revert to healthy after the demo.
+            "SCENARIO": os.environ.get("SCENARIO", "healthy"),
             # S4 flywheel: the deployed agent emits verdict LogEntries so the
             # Cloud Logging -> BigQuery sink builds the durable corpus. Off by
             # default in code; turned on here for the "production" origin.

@@ -451,8 +451,16 @@ geração de casos/dataset/config; a constraint dura `refund ≤ charge` é cura
    demo pt.1**, enquadrado como *"os `EVAL_CASES` podem ser gerados da análise do
    próprio agente → mata o cold-start"*.
 3. **Criar um `.json` simulando a saída do AgentFlux** como exemplo ilustrativo
-   (mostrar + comentar) — TODO da próxima sessão. Guardar em `demos/` ou
-   `agent/evals/samples/`, coerente com os `EVAL_CASES` reais.
+   (mostrar + comentar) — **FEITO** em `agent/evals/samples/agentflux/` (7 arquivos,
+   pipeline `Agent Profiler → Tool Profiler → CUJ Explorer → EvalSet Generator`):
+   `01_agent_profile` · `02_tool_profile` · `03_cuj_catalog` · `04_trajectory_eval_set`
+   (ADK EvalSet real — carrega em `google.adk.evaluation.eval_set.EvalSet`) ·
+   `05_simulation_eval_set` (personas/`conversation_scenario`) · `06_eval_config`
+   (metrics/rubricas + `candidate_constraints` = a fronteira EDD tangível) + `README`.
+   Coerente com os `EVAL_CASES` reais e **validado**: os `expected_verdicts` de cada
+   caso batem com os invariantes reais do `contract.py` (script de check no README/verificado).
+   A fronteira: AgentFlux **gera** metrics/baselines e **só faz surgir** os
+   `candidate_constraints`; o invariante duro (`refund ≤ charge`) é curado à mão.
 4. **Audiência com externos (Accenture):** AgentFlux é interno → não fazer o talk
    depender dele; usá-lo como **evidência** ("rodamos isso na escala"); a técnica
    portável (EDD) + saída no **ADK Eval** é o que o FDE leva.

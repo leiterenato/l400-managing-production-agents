@@ -1,0 +1,153 @@
+{
+  "_agentflux": {
+    "tool": "AgentFlux",
+    "artifact": "tool_profile",
+    "pipeline_step": "2 of 4 — Tool Profiler",
+    "stage": "SIMULATED — hand-authored to mirror the shape AgentFlux emits (I/O schemas + discovered error states). NOT a live AgentFlux run. See README.md.",
+    "mode": "co-pilot",
+    "source": "agent/financial_support/tools + backends (google-adk 2.3.0)",
+    "generated_at": "2026-07-11"
+  },
+
+  "tools": [
+    {
+      "name": "look_up_customer",
+      "used_by": ["financial_support", "refund_specialist", "disputes_specialist"],
+      "purpose": "Read the current customer's account and recent charges (BigQuery in prod).",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "note": "Takes NO customer id argument — identity comes from session state (customer_id). This is a safety property: the model cannot ask to read an arbitrary account."
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"enum": ["ok", "not_found", "error"]},
+          "session_customer_id": {"type": "string"},
+          "queried_customer_id": {"type": "string"},
+          "customer_id": {"type": "string"},
+          "name": {"type": "string"},
+          "email": {"type": "string"},
+          "tier": {"type": "string"},
+          "charges": {"type": "array", "items": {"type": "object"}}
+        }
+      },
+      "error_states": [
+        {
+          "id": "cross_account_read",
+          "trigger": "scenario wrong_account (return_customer_id knob)",
+          "shape": "status=ok, but queried_customer_id != session_customer_id",
+          "risk": "cross-account read -> PII leak",
+          "candidate_constraint": "read_targets_session_customer (POL-1)",
+          "bridge": "Case 3 (Row-Level Security)"
+        },
+        {"id": "read_unavailable", "trigger": "fail=unavailable", "shape": "status=error", "risk": "no account context; downstream steps run blind"},
+        {"id": "unknown_customer", "trigger": "id not in DB", "shape": "status=not_found"}
+      ]
+    },
+
+    {
+      "name": "issue_refund",
+      "used_by": ["refund_specialist"],
+      "purpose": "Move money: issue a refund for a charge via the payment processor.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "charge_id": {"type": "string", "example": "TXN-1001"},
+          "amount": {"type": "number", "description": "Amount to refund. Must not exceed the original charge."},
+          "reason": {"type": "string", "description": "Short reason for the audit trail."}
+        },
+        "required": ["charge_id", "amount", "reason"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"enum": ["refunded", "error"]},
+          "amount": {"type": "number", "description": "What ACTUALLY moved (may differ from requested)."},
+          "requested_amount": {"type": "number"},
+          "charge_amount": {"type": "number", "description": "The ceiling — the original charge."},
+          "currency": {"type": "string"},
+          "confirmation_id": {"type": "string"},
+          "duplicate": {"type": "boolean"}
+        }
+      },
+      "error_states": [
+        {
+          "id": "over_refund",
+          "trigger": "scenario refund_over_charge (over_charge_multiplier) / force_amount",
+          "shape": "status=refunded, amount > charge_amount",
+          "risk": "over-refund -> real money leaves the business",
+          "candidate_constraint": "refund_within_charge (POL-2) — THE hero invariant",
+          "note": "The processor over-pays what it is told; the tool does NOT enforce refund <= charge. A polite reply ('your $50 refund is on its way') can accompany a $500 payout. Tone/quality metrics pass; only the invariant, reading response.amount vs response.charge_amount, catches it. This is 'the green score lies'."
+        },
+        {"id": "refund_declined", "trigger": "fail=declined | timeout (PaymentError)", "shape": "status=error", "risk": "no money moved — must not claim success", "bridge": "Case 2 (resilience)"},
+        {"id": "duplicate_refund", "trigger": "duplicate knob", "shape": "status=refunded, duplicate=true", "risk": "double payout"}
+      ]
+    },
+
+    {
+      "name": "fraud_check",
+      "used_by": ["refund_specialist"],
+      "purpose": "Assess a proposed refund before it is issued.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "charge_id": {"type": "string"},
+          "amount": {"type": "number"}
+        },
+        "required": ["charge_id", "amount"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"enum": ["ok", "error"]},
+          "decision": {"enum": ["allow", "review", "deny"]},
+          "risk_score": {"type": "number"}
+        }
+      },
+      "decision_logic": "amount >= 200 -> 'review', else 'allow' (explainable heuristic; force_decision can pin it). risk_score ~0.05 on allow, ~0.82 otherwise.",
+      "error_states": [
+        {"id": "fraud_unavailable", "trigger": "fail=unavailable", "shape": "status=error", "risk": "refund issued without fraud clearance", "bridge": "Case 2 (A2A dependency down / fallback ladder)"},
+        {
+          "id": "refund_despite_deny",
+          "trigger": "decision=deny but agent refunds anyway",
+          "shape": "issue_refund status=refunded following a fraud deny",
+          "risk": "policy violation — denied refund paid out",
+          "candidate_constraint": "refund_after_fraud_decision (POL-5)"
+        }
+      ]
+    },
+
+    {
+      "name": "open_dispute",
+      "used_by": ["disputes_specialist"],
+      "purpose": "Open a dispute case against an existing own-account charge.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "charge_id": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "required": ["charge_id", "reason"]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": {"enum": ["opened", "not_found"]},
+          "dispute_case_id": {"type": "string"},
+          "charge_id": {"type": "string"},
+          "amount": {"type": "number"},
+          "currency": {"type": "string"},
+          "reason": {"type": "string"},
+          "expected_resolution_days": {"type": "integer"}
+        }
+      },
+      "error_states": [
+        {"id": "charge_not_on_account", "trigger": "charge_id not on the session account", "shape": "status=not_found", "risk": "dispute a charge the customer doesn't own / hallucinate a charge"}
+      ]
+    }
+  ],
+
+  "boundary_note": "The Tool Profiler DISCOVERS error states from the schemas and fault surfaces. Whether an error state is a HARD violation (a deterministic invariant that gates) or a SOFT quality issue (an LLM/rubric metric) is decided by the eval owner. The error states tagged with 'candidate_constraint' are the ones promoted to hand-authored invariants — see 06_eval_config.json and financial_support/contract.py."
+}
