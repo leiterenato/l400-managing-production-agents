@@ -25,20 +25,32 @@ the server-side custom-code metric may receive ``agent_data`` as a JSON *string*
 is a recursive walker that ``json.loads`` any string and finds ``function_response``
 at any depth.
 
-Two modes:
+Three modes:
 
-  * ``--mode static`` — score a fixed, deterministic dataset that already
+  * ``--mode static`` — score a fixed, deterministic 2-case dataset that already
     contains the $500-on-$50 over-refund. No agent is run. The green invariant
     (refund_within_charge) goes RED while the tone judge / managed baselines pass
     — "the green score lies", now visible in the Console.
+
+  * ``--mode dataset`` — score the VERSIONED eval set (evals/data/eval_cases.json),
+    the SAME 5 cases the Camada-1 pre-submit gate checks. Deterministic (records
+    the flows, no live agent). Contains the adversarial over-refund, so the score
+    gate blocks — the managed cloud eval and the offline gate never drift.
 
   * ``--mode agent`` — run the DEPLOYED agent (Agent Engine) over the EDD prompts,
     then score. Needs the deployment armed with SCENARIO=refund_over_charge for
     the money bug to appear; otherwise the invariant is a (truthful) green.
 
+All modes end in a SCORE GATE (Camada 2): the process exits non-zero when the
+``refund_within_charge`` AVERAGE (the mean Vertex AI emits) or MINIMUM drops
+below 1.0, so a Cloud Build step turns a quality regression into a red build
+(post-merge). The evaluationRun resource name + a Console URL are printed for the
+build to link.
+
 Guarded: needs ``EVAL_LIVE_CONFIRM=1`` (calls Preview APIs against your project).
 
     EVAL_LIVE_CONFIRM=1 uv run python -m evals.live_run --mode static
+    EVAL_LIVE_CONFIRM=1 uv run python -m evals.live_run --mode dataset
     EVAL_LIVE_CONFIRM=1 uv run python -m evals.live_run --mode agent
 """
 
@@ -208,6 +220,42 @@ def _static_dataset(types):
     return types.EvaluationDataset(eval_cases=cases)
 
 
+def _dataset_from_cases(types):
+    """EvaluationDataset built from the VERSIONED eval set (evals/data/eval_cases.json).
+
+    Records each seed case's flow (real mock backends under the case's own
+    scenario) and converts the tool calls into the platform ``agent_data`` shape.
+    This is the SAME 5 cases the Camada-1 offline gate checks, so the managed
+    cloud run scores exactly what the pre-submit gate does — no drift between the
+    two layers. The set includes the adversarial over-refund, so
+    refund_within_charge MEAN < 1.0 and the score gate blocks (by design: that is
+    the managed gate demonstrating a regression, deterministically, without
+    running the live agent).
+    """
+    from .record import record_dataset
+
+    recorded = record_dataset()
+    cases = []
+    for inst in recorded:
+        turn = inst["agent_eval_data"]["turns"][0]
+        tool_calls = turn.get("tool_calls", [])
+        reply = turn.get("final_response", "")
+        prompt = inst.get("prompt", "")
+        cases.append(
+            types.EvalCase(
+                eval_case_id=inst["id"],
+                prompt={"role": "user", "parts": [{"text": prompt}]},
+                responses=[
+                    types.ResponseCandidate(
+                        response={"role": "model", "parts": [{"text": reply}]}
+                    )
+                ],
+                agent_data=_agent_data(tool_calls, reply),
+            )
+        )
+    return types.EvaluationDataset(eval_cases=cases)
+
+
 def _get_or_register(client, types, display_name: str, code: str) -> str:
     """Return the resource name of a defensive code metric, registering if absent."""
     try:
@@ -247,22 +295,93 @@ def _find_llm_metric(client, display_name: str) -> str | None:
     return None
 
 
-def _scoreboard(run) -> None:
-    """Print MEAN (or MEDIAN) per metric from the run results."""
+# --- Score gate (Camada 2) -------------------------------------------------
+# The gating invariant + floor. refund_within_charge is binary per case, so an
+# AVERAGE below 1.0 (equivalently, a MINIMUM of 0) means at least one case
+# over-refunded -> block the build.
+_GATE_METRIC = "refund_within_charge"
+_GATE_FLOOR = 1.0
+# The mean the Vertex AI Evaluation Service emits is keyed "AVERAGE" (NOT "MEAN";
+# verified against the SDK's own _get_aggregated_metrics and real run dumps). We
+# keep "MEAN" only as a defensive secondary. We NEVER read "MEDIAN": the median
+# of a binary 0/1 invariant is 1.0 while a MINORITY of cases fail, so a MEDIAN
+# gate would wave the money bug straight through — the exact false-green Case 1
+# exists to expose.
+_MEAN_AGG_KEYS = ("AVERAGE", "MEAN")
+
+
+def _scoreboard(run) -> dict:
+    """Print AVERAGE (+ min / stdev) per metric; return ``{metric: {agg: value}}``.
+
+    The managed run keys each entry ``<candidate>/<metric>/<AGG>`` (e.g.
+    ``Candidate 1/refund_within_charge/AVERAGE``). The metric name is the segment
+    immediately before the aggregation suffix, so group by ``parts[-2]``.
+    """
     d = run.model_dump(exclude_none=True) if hasattr(run, "model_dump") else {}
     sm = ((d.get("evaluation_run_results") or {}).get("summary_metrics") or {}).get("metrics") or {}
     from collections import defaultdict
     agg = defaultdict(dict)
     for k, v in sm.items():
         parts = k.split("/")
-        agg[parts[1] if len(parts) >= 2 else k][parts[-1]] = v
+        metric = parts[-2] if len(parts) >= 2 else k
+        agg[metric][parts[-1]] = v
     print("\n=== Evaluation summary (managed run) ===")
     for metric, aggs in sorted(agg.items()):
-        val = aggs.get("MEAN")
-        if val is None:
-            val = aggs.get("MEDIAN")
-        var = aggs.get("VARIANCE")
-        print(f"  {metric:<26} score={round(val,3) if isinstance(val,(int,float)) else val}  variance={var}")
+        # Headline = AVERAGE (the true mean). NEVER MEDIAN (see _MEAN_AGG_KEYS).
+        avg = next((aggs[k] for k in _MEAN_AGG_KEYS if k in aggs), None)
+        avg_s = round(avg, 3) if isinstance(avg, (int, float)) else avg
+        print(f"  {metric:<26} average={avg_s}  min={aggs.get('MINIMUM')}  "
+              f"stdev={aggs.get('STANDARD_DEVIATION')}")
+    return dict(agg)
+
+
+def _gate_row(agg: dict) -> dict:
+    """Find the gating metric's agg row, tolerant of a key prefix.
+
+    ``_scoreboard`` keys agg by the metric name, but match defensively on any key
+    whose last path segment equals it — so a format surprise degrades to
+    fail-closed (empty row), never a false pass.
+    """
+    if _GATE_METRIC in agg:
+        return agg[_GATE_METRIC] or {}
+    for k, row in agg.items():
+        if k == _GATE_METRIC or str(k).split("/")[-1] == _GATE_METRIC:
+            return row or {}
+    return {}
+
+
+def _apply_score_gate(agg: dict) -> int:
+    """Turn the managed run's score into an exit code (the Camada-2 gate).
+
+    Blocks when the AVERAGE (the mean Vertex actually emits) OR the MINIMUM dips
+    below the floor. NEVER uses MEDIAN (a binary invariant's median hides a
+    failing minority — a false green). Fails CLOSED when neither a mean nor a
+    minimum is present (a metric that could not aggregate is not evidence of
+    correctness).
+    """
+    row = _gate_row(agg)
+    mean = next(
+        (row[k] for k in _MEAN_AGG_KEYS if isinstance(row.get(k), (int, float))), None
+    )
+    minimum = row.get("MINIMUM")
+    signals = [v for v in (mean, minimum) if isinstance(v, (int, float))]
+    if not signals:
+        print(
+            f"\nGATE BLOCK: {_GATE_METRIC} produced no AVERAGE/MINIMUM (metric "
+            "errored on all cases?) — cannot confirm quality, failing closed.",
+            file=sys.stderr,
+        )
+        return 1
+    if min(signals) < _GATE_FLOOR:
+        print(
+            f"\nGATE BLOCK: {_GATE_METRIC} average={mean} min={minimum} < "
+            f"{_GATE_FLOOR:.1f} — an invariant regressed in the managed eval. "
+            "Red build.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\nGATE OK: {_GATE_METRIC} average={mean} min={minimum} >= {_GATE_FLOOR:.1f}.")
+    return 0
 
 
 def run(mode: str, poll_seconds: int = 900) -> int:
@@ -317,6 +436,10 @@ def run(mode: str, poll_seconds: int = 900) -> int:
     kwargs = {}
     if mode == "static":
         dataset = _static_dataset(types)
+    elif mode == "dataset":
+        dataset = _dataset_from_cases(types)
+        print("  dataset: evals/data/eval_cases.json (same 5 cases as the "
+              "Camada-1 gate; contains the adversarial over-refund)")
     elif mode == "agent":
         import pandas as pd
 
@@ -351,10 +474,20 @@ def run(mode: str, poll_seconds: int = 900) -> int:
     )
     name = getattr(created, "name", None)
     rid = name.split("/")[-1] if name else run_name
+    # Emit the resource name + a clickable Console URL BEFORE polling, so Cloud
+    # Build always links the result even if the poll later times out. These runs
+    # land on the Vertex AI evaluation surface (see module docstring).
+    console_url = (
+        "https://console.cloud.google.com/vertex-ai/evaluation/eval-runs"
+        f"?project={project}"
+    )
     print(f"created: {name}")
-    print("Console: Agent Platform > Agents > Deployments > financial-support-agent "
-          "> Dashboard > Evaluation > Experiments")
-    print(f"  run id: {rid}  (labeled to engine {_agent_engine_id(AGENT_ENGINE)})")
+    print(f"  resource name : {name}")
+    print(f"  run id        : {rid}  (labeled to engine {_agent_engine_id(AGENT_ENGINE)})")
+    print(f"  Console       : {console_url}")
+    print("  (Vertex AI > Evaluation. NOTE: managed runs do NOT show in the "
+          "Agent Platform agent-scoped Experiments tab — that is a separate "
+          "backend; see module docstring.)")
 
     # 4) Poll to completion so we can print the scoreboard here too.
     waited = 0
@@ -367,17 +500,23 @@ def run(mode: str, poll_seconds: int = 900) -> int:
             if "FAIL" in up or "ERROR" in up or "CANCEL" in up:
                 print(f"  run ended: {state}")
                 return 1
-            _scoreboard(run_obj)
-            return 0
+            # 5) The Camada-2 gate: score floor on the gating invariant.
+            agg = _scoreboard(run_obj)
+            return _apply_score_gate(agg)
         time.sleep(20)
         waited += 20
-    print(f"\nstill running after {poll_seconds}s — check the Console tab (run id {rid}).")
+    # Timed out before the run finished. We CANNOT confirm the score, so we do
+    # not claim a pass — but the managed run genuinely can take >15 min, so we
+    # exit 0 (non-blocking) and warn loudly rather than red-building on latency.
+    # The resource name + Console URL were printed above for follow-up.
+    print(f"\nstill running after {poll_seconds}s — GATE NOT EVALUATED (timeout). "
+          f"Check the Console (run id {rid}).", file=sys.stderr)
     return 0
 
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Create a managed Evaluation Run (Console).")
-    p.add_argument("--mode", choices=["static", "agent"], default="static")
+    p.add_argument("--mode", choices=["static", "dataset", "agent"], default="static")
     p.add_argument("--poll", type=int, default=900)
     a = p.parse_args(argv)
     return run(a.mode, a.poll)

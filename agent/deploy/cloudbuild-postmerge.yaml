@@ -1,0 +1,48 @@
+# Post-merge / nightly gate for Case 1 — Camada 2 (managed cloud eval, score gate).
+#
+# NOT a pre-submit blocker. It calls the Preview Gen AI Evaluation Service, which
+# costs and (in --mode agent) is non-deterministic. The deterministic pre-submit
+# gate is deploy/cloudbuild.yaml. This layer scores the SAME versioned eval set in
+# the CLOUD, gates on refund_within_charge AVERAGE < 1.0 (the mean Vertex emits),
+# and prints the evaluationRun resource name + Console URL so the build links it.
+#
+#   gcloud builds submit --config agent/deploy/cloudbuild-postmerge.yaml .  # from repo root
+#
+# Wire as a nightly Cloud Scheduler -> Cloud Build run, or a post-merge trigger on
+# main — NOT a required PR check (see deploy/README-ci.md).
+#
+# MODE (default: dataset)
+#   --mode dataset : score evals/data/eval_cases.json (the same 5 cases the
+#     Camada-1 gate checks). Deterministic (records the flows, no live agent). The
+#     set includes the adversarial over-refund, so the score gate BLOCKS by design
+#     — it demonstrates the managed gate firing without spending on live inference.
+#   --mode agent   : run the DEPLOYED agent over the EDD prompts, then score. This
+#     is the true "did the deployed agent regress" gate: green when the deployment
+#     is healthy, red when it over-refunds in production. Swap the flag below to use
+#     it (and ensure the engine's SCENARIO reflects what you want to test).
+
+substitutions:
+  _LOCATION: us-central1
+  _STAGING_BUCKET: gs://YOUR_PROJECT_ID-agent-staging
+
+steps:
+  - id: managed-eval-gate
+    name: python:3.12-slim
+    entrypoint: bash
+    dir: agent
+    env:
+      - EVAL_LIVE_CONFIRM=1
+      - GOOGLE_CLOUD_PROJECT=$PROJECT_ID
+      - GOOGLE_CLOUD_LOCATION=${_LOCATION}
+      - GOOGLE_CLOUD_STAGING_BUCKET=${_STAGING_BUCKET}
+    args:
+      - -c
+      - |
+        pip install uv
+        uv sync --frozen
+        # Exit non-zero when refund_within_charge AVERAGE < 1.0 -> red build. The
+        # evaluationRun resource name + Console URL are printed above the gate line.
+        uv run python -m evals.live_run --mode dataset --poll 900
+
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -21,7 +21,7 @@ import sys
 from .clusters import cluster_failures, render_clusters
 from .eval_core import evaluate_dataset
 from .record import record_dataset
-from .report import print_report
+from .report import print_report, render_regressions
 
 
 def offline_run() -> int:
@@ -29,9 +29,30 @@ def offline_run() -> int:
     result = evaluate_dataset(dataset)
     print_report(result)
 
-    if result.failing:
+    # The EDD gate (Fase 5): block only on a REGRESSION — a case whose actual
+    # verdict diverged from what the contract expects. The seed set deliberately
+    # carries adversarial cases that SHOULD read red; a naive "block on any red"
+    # gate would block every PR forever (and, worse, be blind to an invariant
+    # that silently STOPPED catching its bug). Comparing to the per-case expected
+    # set catches both a new red and a red that vanished.
+    if result.regressions:
+        print("\n" + render_regressions(result.regressions))
+        # The failure clusters name the dominant pattern (the S4 flywheel view).
         print("\n" + render_clusters(cluster_failures(result)))
         return 1
+
+    caught = sorted(
+        {m for c in result.cases for m in c.expected_failing_invariants}
+    )
+    print(
+        f"\nEDD gate GREEN — {result.total}/{result.total} cases match their "
+        "expected verdicts."
+    )
+    if caught:
+        print(
+            "  the adversarial/silent cases tripped exactly the invariants they "
+            f"target ({', '.join(caught)}); the checks work."
+        )
     return 0
 
 

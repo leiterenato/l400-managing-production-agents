@@ -1,23 +1,47 @@
-# Merge gate for Case 1 (the honest version).
+# Pre-submit merge gate for Case 1 (the honest version) — Camada 1.
 #
 # There is NO native "eval gate" in the platform. What blocks the merge is THIS
-# Cloud Build step running the eval and failing the build when an invariant
-# regresses. Quality Alerts (Cloud Monitoring) only *notify*; they do not gate.
+# Cloud Build running (a) the unit tests and (b) the offline EDD gate, and failing
+# the build on a non-zero exit. Quality Alerts (Cloud Monitoring) only *notify*;
+# they do not gate.
 #
-#   gcloud builds submit --config deploy/cloudbuild.yaml
+# Run from the REPO ROOT (a GitHub trigger checks out the whole repo; the agent
+# code is in agent/, so every step uses `dir: agent`):
+#   gcloud builds submit --config agent/deploy/cloudbuild.yaml .
 #
-# Wire it as a required check on the PR branch to make it a true gate.
+# Wire it as a REQUIRED check on the PR branch to make it a true gate (see the
+# trigger + branch-protection commands in deploy/README-ci.md).
+#
+# Deterministic + cheap: no LLM, no GCP calls, no cost. The non-deterministic /
+# billable managed eval is the SEPARATE post-merge config (cloudbuild-postmerge.yaml).
 
 steps:
-  - id: eval-gate
+  # (a) Unit tests — the contract invariants + anti-drift pins run as plain pytest.
+  - id: unit-tests
     name: python:3.12-slim
     entrypoint: bash
+    dir: agent
     args:
       - -c
       - |
         pip install uv
         uv sync --frozen
-        # Non-zero exit if any contract invariant fails -> red build -> merge blocked.
+        uv run pytest -q
+
+  # (b) The EDD gate — records the seed cases, scores them with the SAME contract
+  # invariants, and exits non-zero on a REGRESSION (a case whose verdict diverged
+  # from what the contract expects, in either direction). The seed set carries
+  # adversarial cases that SHOULD be red, so this is green on a healthy baseline
+  # and red only when a real regression appears -> merge blocked.
+  - id: eval-gate
+    name: python:3.12-slim
+    entrypoint: bash
+    dir: agent
+    args:
+      - -c
+      - |
+        pip install uv
+        uv sync --frozen
         uv run python -m evals.run_offline
 
 options:

@@ -100,6 +100,11 @@ def record_case(case: dict[str, Any]) -> dict[str, Any]:
         "scenario": case.get("scenario", "healthy"),
         "note": case.get("note", ""),
         "prompt": case.get("prompt", ""),
+        # Carry the case's expected verdict through to the scorer so the EDD gate
+        # (evals.eval_core) can compare actual vs expected per case. Absent -> [].
+        "expected_failing_invariants": list(
+            case.get("expected_failing_invariants", [])
+        ),
         "agent_eval_data": {
             "turns": [{"tool_calls": calls, "final_response": reply}]
         },
