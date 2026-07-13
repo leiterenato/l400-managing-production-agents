@@ -101,6 +101,18 @@ class Settings:
     breaker_open_after: int
     breaker_timeout_s: float
 
+    # --- Identity / data-access boundary (Case 3) -----------------------
+    # The look-up data plane. Under "mock" (default) the customer read is the
+    # in-memory fixture — Cases 1 and 2 never touch GCP. Under "bigquery" the
+    # read runs AS THE CALLER'S PRINCIPAL against a per-tenant dataset, so
+    # BigQuery IAM decides: the owner gets the row, everyone else gets a real
+    # 403. The dataset name is the template with ``{cust}`` filled from the
+    # requested customer id (e.g. CUST-001 -> tenant_cust001). See
+    # backends/customer_db.py and callbacks/identity.py.
+    customer_db_backend: str
+    bq_customers_dataset_template: str
+    bq_customers_table: str
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -122,6 +134,11 @@ class Settings:
             session_budget_usd=_env_float("SESSION_BUDGET_USD", 0.50),
             breaker_open_after=int(_env_str("BREAKER_OPEN_AFTER", "3")),
             breaker_timeout_s=_env_float("BREAKER_TIMEOUT_S", 5.0),
+            customer_db_backend=_env_str("CUSTOMER_DB_BACKEND", "mock"),
+            bq_customers_dataset_template=_env_str(
+                "BQ_CUSTOMERS_DATASET_TEMPLATE", "tenant_{cust}"
+            ),
+            bq_customers_table=_env_str("BQ_CUSTOMERS_TABLE", "customer"),
         )
 
 

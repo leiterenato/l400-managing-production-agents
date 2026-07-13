@@ -40,6 +40,10 @@ REQUIREMENTS = [
     "google-cloud-aiplatform[agent-engines]>=1.159.0",
     # The seam emits verdict LogEntries via the Cloud Logging client (S4 sink).
     "google-cloud-logging>=3.11.0",
+    # Case 3: the look-up runs as the caller's principal against BigQuery (the
+    # real 403). Needed only under CUSTOMER_DB_BACKEND=bigquery, but the deployed
+    # container must carry it. Impersonation uses google-auth (a transitive dep).
+    "google-cloud-bigquery>=3.25.0",
 ]
 
 
@@ -132,6 +136,17 @@ def deploy() -> int:
             ),
             "COST_PROJECT_ID": os.environ.get("COST_PROJECT_ID", "proj-support"),
             "COST_ORG_ID": os.environ.get("COST_ORG_ID", "org-acme"),
+            # --- Case 3 zero-trust / data-access boundary (dormant CASE<3) ----
+            # The look-up data plane. Defaults to "mock" so a stray deploy never
+            # hits BigQuery; the C3 side-by-side 403 is the LOCAL identity_ab.py
+            # driver (a deployed engine runs as ONE service account and cannot
+            # show two per-user 403s). Set CUSTOMER_DB_BACKEND=bigquery only for a
+            # deliberate "production" C3 engine.
+            "CUSTOMER_DB_BACKEND": os.environ.get("CUSTOMER_DB_BACKEND", "mock"),
+            "BQ_CUSTOMERS_DATASET_TEMPLATE": os.environ.get(
+                "BQ_CUSTOMERS_DATASET_TEMPLATE", "tenant_{cust}"
+            ),
+            "BQ_CUSTOMERS_TABLE": os.environ.get("BQ_CUSTOMERS_TABLE", "customer"),
             # Documented ADK tracing env vars (the replacement for enable_tracing).
             # These three are all that's needed: the platform's own telemetry
             # set_up() then builds the CANONICAL OTel Resource

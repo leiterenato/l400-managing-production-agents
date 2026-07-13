@@ -46,10 +46,11 @@ def test_happy_cases_pass():
 def test_gate_blocks_and_pass_rate():
     result = evaluate_dataset(record_dataset())
     assert not result.gate_ok
-    # happy_refund + happy_dispute pass; over_refund, silent_skipped_lookup and
-    # cross_account fail (each on exactly one invariant).
-    assert len(result.failing) == 3
-    assert result.total == 5
+    # happy_refund + happy_dispute pass; over_refund, silent_skipped_lookup,
+    # adversarial_cross_account and exfil_injection fail (each on exactly one
+    # invariant).
+    assert len(result.failing) == 4
+    assert result.total == 6
 
 
 def test_failure_clusters_named():
@@ -57,4 +58,6 @@ def test_failure_clusters_named():
     clusters = {c.pattern: c.count for c in cluster_failures(result)}
     assert clusters.get("Refund Exceeds Charge") == 1
     assert clusters.get("Incorrect Tool Selection") == 1
-    assert clusters.get("Cross-Account Data Access") == 1
+    # Two cross-account attacks now: adversarial_cross_account + exfil_injection
+    # (the literal stage injection added by Case 3's "Close the Loop").
+    assert clusters.get("Cross-Account Data Access") == 2

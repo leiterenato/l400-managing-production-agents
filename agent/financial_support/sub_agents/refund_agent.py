@@ -14,7 +14,7 @@ from google.adk.tools.agent_tool import AgentTool
 
 from ..callbacks import assemble
 from ..model import build_model
-from ..prompts import REFUND_INSTRUCTION, with_resilience_fallback
+from ..prompts import REFUND_INSTRUCTION, with_identity_clause, with_resilience_fallback
 from ..tools import build_remote_fraud_agent, fraud_check, issue_refund, look_up_customer
 
 
@@ -32,7 +32,7 @@ def build_refund_agent() -> LlmAgent:
         model=build_model(),
         description="Handles refund requests: verifies the charge, runs a fraud "
         "check, and issues the refund.",
-        instruction=with_resilience_fallback(REFUND_INSTRUCTION),
+        instruction=with_identity_clause(with_resilience_fallback(REFUND_INSTRUCTION)),
         tools=[look_up_customer, _fraud_tool(), issue_refund],
         **assemble(),
     )

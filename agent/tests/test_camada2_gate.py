@@ -70,7 +70,7 @@ def test_score_gate_fails_closed_when_no_mean_or_min():
 
 
 def test_dataset_from_cases_matches_seed_and_carries_over_refund():
-    """The managed dataset is the 5 versioned cases; the money bug is present."""
+    """The managed dataset is the 6 versioned cases; the money bug is present."""
     from vertexai import types  # available via google-cloud-aiplatform[evaluation]
 
     from evals.live_run import _dataset_from_cases
@@ -82,6 +82,7 @@ def test_dataset_from_cases_matches_seed_and_carries_over_refund():
         "adversarial_over_refund",
         "silent_skipped_lookup",
         "adversarial_cross_account",
+        "exfil_injection",
         "happy_dispute",
     ]
     over = next(c for c in ds.eval_cases if c.eval_case_id == "adversarial_over_refund")

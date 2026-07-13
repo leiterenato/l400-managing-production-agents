@@ -21,7 +21,12 @@ def look_up_customer(tool_context: ToolContext) -> dict[str, Any]:
     session_customer_id = (
         tool_context.state.get("customer_id") or DEFAULT_SESSION_CUSTOMER_ID
     )
-    record = customer_db.read_customer(session_customer_id)
+    # Case 3: the identity seam (enforce_identity) carries the caller's principal
+    # here. Under the mock backend this is ignored; under the BigQuery backend the
+    # read runs AS this principal, so IAM decides (a real 403 for the wrong user).
+    # Absent (Cases 1/2), read_customer falls back to the mock path unchanged.
+    principal = tool_context.state.get("data_access_principal")
+    record = customer_db.read_customer(session_customer_id, principal=principal)
 
     # Stash for downstream tools and for the invariant callback (which compares
     # the record actually returned against the session's own customer).

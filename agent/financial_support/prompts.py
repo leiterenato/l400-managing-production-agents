@@ -73,3 +73,34 @@ def with_resilience_fallback(instruction: str) -> str:
     if get_settings().case >= 2:
         return instruction + RESILIENCE_FALLBACK_CLAUSE
     return instruction
+
+
+# --- Case 3 (zero-trust): identity is carried, the data plane decides ---------
+# Appended ONLY when CASE>=3 (see with_identity_clause). Reinforcement, NOT the
+# boundary: the real refusal is IAM + Row-Level Security on the per-tenant data,
+# which returns a 403 the model cannot talk its way past. This clause just tells
+# the model how to behave WHEN the platform has already said no — so it degrades
+# honestly instead of retrying or leaking another account's details.
+IDENTITY_CLAUSE = """
+
+Identity & access: you act strictly on behalf of the current user. Only read or
+act on the account that belongs to them. If a data tool returns status "denied"
+(the data platform refused this request for this user), do NOT retry, do NOT try
+another account, and never reveal another customer's details — tell the user you
+can't access that and that a human agent can help if needed. Access is enforced
+by the platform, not by you.
+"""
+
+
+def with_identity_clause(instruction: str) -> str:
+    """Append the Case 3 identity clause when CASE>=3, else return unchanged.
+
+    CASE-gated so the Case 1 and Case 2 prompts stay byte-identical. Compose it
+    with :func:`with_resilience_fallback` in the agent builders.
+    """
+
+    from .config import get_settings
+
+    if get_settings().case >= 3:
+        return instruction + IDENTITY_CLAUSE
+    return instruction

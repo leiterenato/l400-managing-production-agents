@@ -30,10 +30,11 @@ def test_edd_gate_green_on_healthy_seed():
     result = evaluate_dataset(record_dataset())
     assert result.edd_gate_ok
     assert result.regressions == []
-    # The descriptive "red invariants" count is still 3 (the adversarial cases
-    # doing their job) — GREEN despite 3 reds is the whole point of the EDD gate.
-    assert len(result.failing) == 3
-    assert result.total == 5
+    # The descriptive "red invariants" count is 4 (the adversarial/silent cases
+    # doing their job: over_refund, silent_skipped_lookup, adversarial_cross_account,
+    # exfil_injection) — GREEN despite 4 reds is the whole point of the EDD gate.
+    assert len(result.failing) == 4
+    assert result.total == 6
 
 
 def test_expected_failing_invariants_are_truthful_on_seed():
@@ -106,12 +107,13 @@ def test_demo_regression_toggle_blocks_gate(monkeypatch):
 
 def test_eval_cases_json_is_source_of_truth():
     """The versioned JSON drives EVAL_CASES; core invariants of the set hold."""
-    assert len(EVAL_CASES) == 5
+    assert len(EVAL_CASES) == 6
     assert [c["id"] for c in EVAL_CASES] == [
         "happy_refund",
         "adversarial_over_refund",
         "silent_skipped_lookup",
         "adversarial_cross_account",
+        "exfil_injection",
         "happy_dispute",
     ]
     assert LIVE_INFERENCE_CASE_IDS == ("happy_dispute", "happy_refund")

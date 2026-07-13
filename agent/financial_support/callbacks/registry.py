@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .identity import enforce_identity
 from .invariants import enforce_invariants
 from .resilience import (
     budget_guard,
@@ -112,7 +113,14 @@ register(
     )
 )
 
-# Case 3 (zero-trust) registers its bundle here when built, e.g.:
-#   register(CallbackBundle(name="identity", case=3,
-#                           before_tool=[enforce_identity]))
-# With CASE=1 both stay dormant; the Case 1 demo shows only the invariant seam.
+# --- Case 3 concern: zero-trust (delegated identity carrier) ---------------
+# Dormant under CASE<3 (assemble() filters case > active_case) and the carrier
+# self-guards on the active case. before_tool order becomes
+# [circuit_breaker, enforce_identity]: the breaker (off in the C3 demo) is a
+# no-op, then enforce_identity carries the caller's identity to the data plane.
+# It NEVER blocks — the refusal (the real 403) belongs to BigQuery IAM.
+register(
+    CallbackBundle(name="identity", case=3, before_tool=[enforce_identity])
+)
+# With CASE=1 all later bundles stay dormant; the Case 1 demo shows only the
+# invariant seam.
