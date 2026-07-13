@@ -86,6 +86,24 @@ def test_edd_gate_catches_weakened_invariant():
     assert case.unexpected_failures == []
 
 
+def test_demo_regression_toggle_blocks_gate(monkeypatch):
+    """DEMO_REGRESSION=1 stages a fresh regression for the Slide-4 gate demo.
+
+    It flips the in-policy happy refund case to the over-charge fault, so
+    ``refund_within_charge`` reads red where the contract expects green — a single
+    unexpected red the EDD gate blocks on (``run_offline`` exits 1 -> a red Cloud
+    Build). Off by default the baseline stays green (see the green-on-seed test).
+    """
+    monkeypatch.setenv("DEMO_REGRESSION", "1")
+    result = evaluate_dataset(record_dataset())
+    assert not result.edd_gate_ok
+    # Exactly one NEW regression, on the clean refund case — nothing else flips.
+    assert [c.id for c in result.regressions] == ["happy_refund"]
+    case = _by_id(result)["happy_refund"]
+    assert case.unexpected_failures == ["refund_within_charge"]
+    assert case.missed_failures == []
+
+
 def test_eval_cases_json_is_source_of_truth():
     """The versioned JSON drives EVAL_CASES; core invariants of the set hold."""
     assert len(EVAL_CASES) == 5

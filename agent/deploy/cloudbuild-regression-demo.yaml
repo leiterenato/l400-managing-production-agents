@@ -1,0 +1,46 @@
+# Slide-4 "Deploy Blocked" demo — the RED build (the EDD gate catching a regression).
+#
+# Identical to cloudbuild.yaml (unit tests + the offline EDD gate), except the
+# gate step runs with DEMO_REGRESSION=1. That toggle (see evals/record.py) stages
+# a shipped-change regression: the in-policy HEALTHY refund now over-pays, so
+# refund_within_charge reads red where the contract expects green. `run_offline`
+# exits non-zero -> THIS BUILD FAILS (red) -> "Deploy Blocked".
+#
+# The honest baseline gate (cloudbuild.yaml) is untouched and stays GREEN; this
+# config exists only to produce the red build shown on Slide 4. Nothing native
+# blocks the merge — what blocks it is this Cloud Build failing on a non-zero exit.
+#
+# Run from the REPO ROOT:
+#   gcloud builds submit --config agent/deploy/cloudbuild-regression-demo.yaml .
+#
+# Deterministic + cheap: no LLM, no GCP calls, no cost in the steps themselves.
+
+steps:
+  # (a) Unit tests — run WITHOUT the demo toggle, so they pass (green step).
+  - id: unit-tests
+    name: python:3.12-slim
+    entrypoint: bash
+    dir: agent
+    args:
+      - -c
+      - |
+        pip install uv
+        uv sync --frozen
+        uv run pytest -q
+
+  # (b) The EDD gate WITH the staged regression -> non-zero exit -> red build.
+  - id: eval-gate-regression
+    name: python:3.12-slim
+    entrypoint: bash
+    dir: agent
+    env:
+      - DEMO_REGRESSION=1
+    args:
+      - -c
+      - |
+        pip install uv
+        uv sync --frozen
+        uv run python -m evals.run_offline
+
+options:
+  logging: CLOUD_LOGGING_ONLY

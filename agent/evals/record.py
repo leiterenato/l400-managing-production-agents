@@ -88,16 +88,53 @@ def _run_flow(case: dict[str, Any]) -> tuple[list[dict], str]:
     return calls, reply
 
 
+def _demo_regression_on() -> bool:
+    """Whether the Slide-4 gate demo's staged regression is armed (off by default).
+
+    Set ``DEMO_REGRESSION=1`` to simulate a shipped change that makes a HEALTHY
+    refund over-pay (the Friday-model-swap disaster from the cold open). It flips
+    exactly the in-policy happy refund case — the one the contract expects to be
+    CLEAN — to the over-charge fault, so ``refund_within_charge`` reads red where
+    green is expected. That is a REGRESSION (actual != expected), which is what
+    the EDD gate blocks on: ``run_offline`` exits 1 -> a red Cloud Build. Nothing
+    else changes, so the honest baseline stays green. This is a demo prop for the
+    "Deploy Blocked" beat, not a real fault path.
+    """
+
+    return os.environ.get("DEMO_REGRESSION", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _scenario_for(case: dict[str, Any]) -> str:
+    """Pick the fault scenario to record this case under.
+
+    Normally the case's own ``scenario``. When the demo regression is armed, the
+    clean in-policy refund case (flow ``refund`` with no expected failures) is
+    recorded under ``refund_over_charge`` instead — staging the single new red
+    that turns the gate build red. See :func:`_demo_regression_on`.
+    """
+
+    if (
+        _demo_regression_on()
+        and case.get("flow") == "refund"
+        and not case.get("expected_failing_invariants")
+    ):
+        return "refund_over_charge"
+    return case.get("scenario", "healthy")
+
+
 def record_case(case: dict[str, Any]) -> dict[str, Any]:
     """Record one seed case into an eval instance under its scenario."""
 
-    os.environ["SCENARIO"] = case.get("scenario", "healthy")
+    scenario = _scenario_for(case)
+    os.environ["SCENARIO"] = scenario
     reload_settings()
     calls, reply = _run_flow(case)
     return {
         "id": case["id"],
         "kind": case["kind"],
-        "scenario": case.get("scenario", "healthy"),
+        # Record the scenario actually used (so an armed demo regression shows the
+        # over-charge fault on the recorded instance, not the case's paper value).
+        "scenario": scenario,
         "note": case.get("note", ""),
         "prompt": case.get("prompt", ""),
         # Carry the case's expected verdict through to the scorer so the EDD gate
