@@ -44,3 +44,32 @@ Process:
 Only open disputes against charges that belong to this customer. Be concise and
 professional.
 """
+
+
+# --- Case 2 (resilience): "degrade, don't invent" ----------------------------
+# Appended to the money/orchestration instructions ONLY when CASE>=2 (see the
+# agent builders / with_resilience_fallback). Kept OUT of the shared base
+# instructions above so the Case 1 prompt stays byte-identical. The real
+# mechanism is the breaker's runtime-injected tool result; this clause is
+# reinforcement so the model reacts to that fact instead of retrying blindly.
+RESILIENCE_FALLBACK_CLAUSE = """
+
+Resilience: if a tool result has status "unavailable", do NOT call that tool
+again. If it includes a cached value, you may relay it but say it may be out of
+date. Otherwise, tell the customer you can't complete this right now and a human
+agent will follow up. Degrade honestly — never invent balances, amounts, or
+confirmation ids.
+"""
+
+
+def with_resilience_fallback(instruction: str) -> str:
+    """Append the Case 2 fallback clause when CASE>=2, else return unchanged.
+
+    CASE-gated so the Case 1 prompt is byte-identical to before.
+    """
+
+    from .config import get_settings
+
+    if get_settings().case >= 2:
+        return instruction + RESILIENCE_FALLBACK_CLAUSE
+    return instruction

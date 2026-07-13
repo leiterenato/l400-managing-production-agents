@@ -17,7 +17,7 @@ from google.adk.agents import LlmAgent
 
 from .callbacks import assemble
 from .model import build_model
-from .prompts import ROOT_INSTRUCTION
+from .prompts import ROOT_INSTRUCTION, with_resilience_fallback
 from .sub_agents import build_disputes_agent, build_refund_agent
 from .tools import look_up_customer
 
@@ -39,7 +39,7 @@ def build_root_agent() -> LlmAgent:
         model=build_model(),
         description="Front door of the financial support team. Routes to the "
         "refund and disputes specialists.",
-        instruction=ROOT_INSTRUCTION,
+        instruction=with_resilience_fallback(ROOT_INSTRUCTION),
         sub_agents=[build_refund_agent(), build_disputes_agent()],
         tools=[look_up_customer],
         **assemble(),

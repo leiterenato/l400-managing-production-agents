@@ -85,18 +85,26 @@ def deploy() -> int:
     # ADK_CAPTURE_MESSAGE_CONTENT_IN_SPANS=true -> oversized span attributes).
     app = reasoning_engines.AdkApp(agent=root_agent)
 
+    # Which case this engine runs. A distinct display name per case keeps the
+    # Case 1 (armed) engine and the Case 2 (resilience) engine separate in the
+    # console — the demos never disturb each other.
+    case = os.environ.get("CASE", "1")
     common = dict(
-        display_name="financial-support-agent",
-        description="L400 reference agent (Case 1). Managed runtime for the "
-        "S4 flywheel: production traces feed the online monitor.",
+        display_name=f"financial-support-agent-c{case}",
+        description=(
+            f"L400 reference agent (CASE={case}). Managed runtime for the S4 "
+            "flywheel; a distinct engine per case so the demos never disturb "
+            "each other."
+        ),
         requirements=REQUIREMENTS,
         # Ship our source: the pickled agent references the local
         # `financial_support` package, so the container needs its code too
         # (otherwise it starts up with "No module named 'financial_support'").
         extra_packages=["financial_support"],
         env_vars={
-            # Keep the demo scoped to Case 1 in production too.
-            "CASE": os.environ.get("CASE", "1"),
+            # Per-deploy case (NOT hard-defaulted to 2, so a Case 1 deploy stays
+            # Case 1). CASE=2 wires the resilience bundle; CASE=1 keeps it dormant.
+            "CASE": case,
             # Fault profile the DEPLOYED agent runs under. Default healthy; arm
             # with SCENARIO=refund_over_charge so a real refund over-pays ($500
             # on a $50 charge) and the invariant goes RED on the agent tab.
@@ -109,6 +117,21 @@ def deploy() -> int:
             "EVAL_AUDIT_LOG_NAME": os.environ.get(
                 "EVAL_AUDIT_LOG_NAME", "agent_spans_live"
             ),
+            # --- Case 2 resilience/cost (dormant under CASE=1) ---------------
+            # The semantic breaker + per-session budget. BREAKER defaults off so
+            # a plain CASE=2 deploy is calm; the A/B driver flips it per pass.
+            "BREAKER": os.environ.get("BREAKER", "off"),
+            "SESSION_BUDGET_USD": os.environ.get("SESSION_BUDGET_USD", "0.50"),
+            "BREAKER_OPEN_AFTER": os.environ.get("BREAKER_OPEN_AFTER", "3"),
+            "BREAKER_TIMEOUT_S": os.environ.get("BREAKER_TIMEOUT_S", "5.0"),
+            # Cost seam -> Logging -> BigQuery cost_spans (the real pipe behind
+            # evals/cost_scale.py's seeder). On in "production" like EVAL_AUDIT_LOG.
+            "COST_AUDIT_LOG": os.environ.get("COST_AUDIT_LOG", "true"),
+            "COST_AUDIT_LOG_NAME": os.environ.get(
+                "COST_AUDIT_LOG_NAME", "cost_spans_live"
+            ),
+            "COST_PROJECT_ID": os.environ.get("COST_PROJECT_ID", "proj-support"),
+            "COST_ORG_ID": os.environ.get("COST_ORG_ID", "org-acme"),
             # Documented ADK tracing env vars (the replacement for enable_tracing).
             # These three are all that's needed: the platform's own telemetry
             # set_up() then builds the CANONICAL OTel Resource

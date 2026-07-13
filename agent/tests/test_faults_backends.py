@@ -43,6 +43,15 @@ def test_payment_declined_raises():
         payment_processor.execute_refund("CUST-001", "TXN-1001", 50.0)
 
 
+def test_retry_storm_is_slow_and_failing():
+    # Case 2 robustness profile: trips the breaker on BOTH signals (latency +
+    # hard error). Assert the knobs directly (calling execute_refund would sleep).
+    _set_scenario("retry_storm")
+    fault = fault_for("issue_refund")
+    assert fault.latency_s == 8.0
+    assert fault.fail == "timeout"
+
+
 def test_wrong_account_reads_other_customer():
     _set_scenario("wrong_account")
     rec = customer_db.read_customer("CUST-001")

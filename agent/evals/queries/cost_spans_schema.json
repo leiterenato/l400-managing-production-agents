@@ -1,0 +1,39 @@
+[
+  {"name": "timestamp", "type": "TIMESTAMP", "mode": "REQUIRED",
+   "description": "LogEntry.timestamp — when the cost span was emitted."},
+  {"name": "receiveTimestamp", "type": "TIMESTAMP", "mode": "NULLABLE"},
+  {"name": "severity", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "logName", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "insertId", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "trace", "type": "STRING", "mode": "NULLABLE",
+   "description": "projects/<p>/traces/<trace_id> — links the row back to the model span carrying gen_ai.cost.usd."},
+  {"name": "spanId", "type": "STRING", "mode": "NULLABLE"},
+  {"name": "resource", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "type", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "labels", "type": "RECORD", "mode": "NULLABLE", "fields": [
+      {"name": "project_id", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "location", "type": "STRING", "mode": "NULLABLE"},
+      {"name": "reasoning_engine_id", "type": "STRING", "mode": "NULLABLE"}
+    ]}
+  ]},
+  {"name": "labels", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "agent", "type": "STRING", "mode": "NULLABLE"}
+  ]},
+  {"name": "jsonPayload", "type": "RECORD", "mode": "NULLABLE", "fields": [
+    {"name": "model", "type": "STRING", "mode": "NULLABLE",
+     "description": "The Gemini model the cost was computed for."},
+    {"name": "tool_name", "type": "STRING", "mode": "NULLABLE",
+     "description": "Span the cost lives on (call_llm)."},
+    {"name": "cost_usd", "type": "FLOAT", "mode": "NULLABLE",
+     "description": "Mirror of the gen_ai.cost.usd span attribute (you instrument this; the platform does not)."},
+    {"name": "prompt_tokens", "type": "INTEGER", "mode": "NULLABLE"},
+    {"name": "candidate_tokens", "type": "INTEGER", "mode": "NULLABLE"},
+    {"name": "session_id", "type": "STRING", "mode": "NULLABLE"},
+    {"name": "user_id", "type": "STRING", "mode": "NULLABLE",
+     "description": "Cost attribution label — the tenant hierarchy: user."},
+    {"name": "project_id", "type": "STRING", "mode": "NULLABLE",
+     "description": "Cost attribution label — the tenant hierarchy: project/team."},
+    {"name": "org_id", "type": "STRING", "mode": "NULLABLE",
+     "description": "Cost attribution label — the tenant hierarchy: org."}
+  ]}
+]

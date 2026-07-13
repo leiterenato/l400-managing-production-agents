@@ -34,6 +34,16 @@ def _env_str(name: str, default: str) -> str:
     return val if val else default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of the agent configuration."""
@@ -78,6 +88,19 @@ class Settings:
     # --- A2A (external fraud-check agent) --------------------------------
     fraud_agent_url: str
 
+    # --- Resilience seam (Case 2) ---------------------------------------
+    # Semantic circuit breaker + per-session cost budget. All no-ops under
+    # CASE=1 (the resilience bundle is not wired) and the breaker additionally
+    # self-guards on ``breaker != "on"``. See callbacks/resilience.py.
+    #   breaker            "on" | "off" — master switch for the breaker
+    #   session_budget_usd budget_guard hands off once a session crosses this
+    #   breaker_open_after N failures (slow-or-error) before the circuit opens
+    #   breaker_timeout_s  a tool call slower than this counts as a failure
+    breaker: str
+    session_budget_usd: float
+    breaker_open_after: int
+    breaker_timeout_s: float
+
     @classmethod
     def from_env(cls) -> "Settings":
         return cls(
@@ -95,6 +118,10 @@ class Settings:
             fraud_agent_url=_env_str(
                 "FRAUD_AGENT_URL", "http://localhost:8001"
             ),
+            breaker=_env_str("BREAKER", "off"),
+            session_budget_usd=_env_float("SESSION_BUDGET_USD", 0.50),
+            breaker_open_after=int(_env_str("BREAKER_OPEN_AFTER", "3")),
+            breaker_timeout_s=_env_float("BREAKER_TIMEOUT_S", 5.0),
         )
 
 

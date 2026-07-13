@@ -91,6 +91,13 @@ SCENARIOS: dict[str, dict[str, dict[str, Any]]] = {
         "issue_refund": {"fail": "declined"},
     },
 
+    # Slow AND failing: the sharpest retry-storm profile — trips the breaker on
+    # both the latency signal and the hard error. `slow_payment` stays the
+    # headline (slow, but returns "refunded"); this is the robustness variant.
+    "retry_storm": {
+        "issue_refund": {"latency_s": 8.0, "fail": "timeout"},
+    },
+
     # ---- Case 2 bridge: external A2A dependency down ------------------
     "fraud_unavailable": {
         "fraud_check": {"fail": "unavailable"},
