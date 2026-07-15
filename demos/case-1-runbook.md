@@ -254,16 +254,29 @@ instrumentação (o ponto do EDD).
 
 ---
 
-## 7. (Opcional) Cloud Build gate — o barrador do merge · **não validado ainda** ⚠️
+## 7. Cloud Build gate — o barrador do merge · **VALIDADO RED+GREEN** ✅ (live 2026-07-15)
 
-**Slide/beat:** S3/S4 — o gate de CI/CD (não é nativo; quem barra é o Cloud Build).
+**Slide/beat:** S7 — o gate de CI/CD (não é nativo; quem barra é o Cloud Build).
+
+⚠️ **Rodar do REPO ROOT** (os steps usam `dir: agent`; o `.` é a fonte). O `gcloud builds
+submit` envia o **working dir** (mudança uncommitted vai junto); o `.venv` fica de fora
+via `.gitignore`.
 
 ```bash
-gcloud builds submit --config deploy/cloudbuild.yaml
+# GREEN — baseline saudável → gate OK → build verde
+gcloud builds submit --config agent/deploy/cloudbuild.yaml .
+# RED — regressão encenada (DEMO_REGRESSION=1) → BLOCK MERGE → build vermelho (gcloud sai ≠0 = esperado)
+gcloud builds submit --config agent/deploy/cloudbuild-regression-demo.yaml .
 ```
 
-**O que esperar:** o build roda `run_offline`; sai `!=0` → **build vermelho** → merge
-barrado. **Honestidade:** o gate **não é nativo** — Quality Alerts só notificam.
+**O que esperar (validado 2026-07-15, eval set com 6 casos):**
+- **GREEN:** `cases=6  red=4 (4 expected catches)  EDD_gate=OK` · unit-tests 98 passed · **SUCCESS** (~57s).
+- **RED:** `cases=6  red=5 (4 expected catches + 1 regression)  EDD_gate=BLOCK MERGE` · **FAILURE** (o `gcloud` sai ≠0 — é o build vermelho, esperado).
+
+**Honestidade:** o gate **não é nativo** (Quality Alerts só notificam); o RED é regressão
+**encenada** (toggle), narrada como o model-swap de sexta. Só a REGRESSÃO barra — os
+catches adversariais são o check funcionando (a linha do gate quebra isso em
+`red=N (M expected catches + K regression)`).
 
 ---
 
@@ -320,5 +333,5 @@ BQ/monitor**.
 - **ADC:** metadata server (escopo `cloud-platform`) — sem arquivo de credencial
 
 Status de validação: Fase 0 ✅ · Fase 1 (S2) ✅ · Fase 2 (S3) ✅ (payoff 6/6) ·
-Fase 3 (Runtime) / 4 (BQ seed) / 5 (Cloud Build) = **primeira execução com creds
-pendente** (reserve tempo para depurar no pré-run).
+Fase 5 (Cloud Build gate) ✅ (RED+GREEN live 2026-07-15) · Fase 3 (Runtime) / 4 (BQ
+seed) = **primeira execução com creds pendente** (reserve tempo para depurar no pré-run).

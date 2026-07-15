@@ -58,11 +58,17 @@ def render(result: EvalResult) -> str:
             lines.append(f"    · {c.note}")
     lines.append("\n" + "-" * 72)
     # The bottom line is the EDD gate: block on a *regression*, not on the seed
-    # set's expected adversarial reds. `red_invariants` is shown for context (it
-    # is always 3 here — the adversarial cases doing their job).
+    # set's expected adversarial reds. Break the red count into expected catches
+    # (adversarial cases doing their job) vs regressions (a verdict that diverged
+    # from the contract) so "why did it block?" reads clean on screen.
+    regression_ids = {c.id for c in result.regressions}
+    expected_catches = sum(1 for c in result.failing if c.id not in regression_ids)
+    n_reg = len(result.regressions)
+    red_breakdown = f"{expected_catches} expected catch{'es' if expected_catches != 1 else ''}"
+    if n_reg:
+        red_breakdown += f" + {n_reg} regression{'s' if n_reg != 1 else ''}"
     lines.append(
-        f"cases={result.total}  red_invariants={len(result.failing)} (expected "
-        f"catches)  regressions={len(result.regressions)}  "
+        f"cases={result.total}  red={len(result.failing)} ({red_breakdown})  "
         f"EDD_gate={'OK' if result.edd_gate_ok else 'BLOCK MERGE'}"
     )
     lines.append(
