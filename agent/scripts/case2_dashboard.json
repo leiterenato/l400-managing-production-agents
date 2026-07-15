@@ -1,0 +1,71 @@
+{
+  "displayName": "Case 2 — Contain the Blast (Slide 10)",
+  "mosaicLayout": {
+    "columns": 12,
+    "tiles": [
+      {
+        "xPos": 0, "yPos": 0, "width": 12, "height": 5,
+        "widget": {
+          "title": "Request latency — baseline -> incident (storm) -> recovery (fix)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/agent/request_latency_p50\" resource.type=\"global\" metric.label.\"run\"=\"case2-final\"",
+                    "aggregation": {"alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_MEAN"}
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "median latency p50 (s)"
+              }
+            ],
+            "yAxis": {"label": "seconds", "scale": "LINEAR"}
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 5, "width": 6, "height": 4,
+        "widget": {
+          "title": "Breaker-open fallbacks / min — the fix engaging",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/agent/breaker_open_count\" resource.type=\"global\" metric.label.\"run\"=\"case2-final\"",
+                    "aggregation": {"alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_MEAN"}
+                  }
+                },
+                "plotType": "STACKED_BAR",
+                "legendTemplate": "breaker-open / min"
+              }
+            ],
+            "yAxis": {"label": "fallbacks/min", "scale": "LINEAR"}
+          }
+        }
+      },
+      {
+        "xPos": 6, "yPos": 5, "width": 6, "height": 4,
+        "widget": {
+          "title": "Sessions / min — the fleet stalls, then recovers",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "timeSeriesFilter": {
+                    "filter": "metric.type=\"custom.googleapis.com/agent/sessions_per_min\" resource.type=\"global\" metric.label.\"run\"=\"case2-final\"",
+                    "aggregation": {"alignmentPeriod": "60s", "perSeriesAligner": "ALIGN_MEAN"}
+                  }
+                },
+                "plotType": "LINE",
+                "legendTemplate": "sessions/min"
+              }
+            ],
+            "yAxis": {"label": "sessions/min", "scale": "LINEAR"}
+          }
+        }
+      }
+    ]
+  }
+}

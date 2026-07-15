@@ -8,6 +8,7 @@ dependencies = [
     "google-adk[a2a]>=2.3.0",
     "google-cloud-aiplatform[evaluation,agent-engines]>=1.159.0",
     "google-cloud-logging>=3.11.0",
+    "google-cloud-monitoring>=2.31.0",
     "opentelemetry-exporter-otlp-proto-http==1.42.1",
     "opentelemetry-resourcedetector-gcp>=1.12.0a0",
 ]
