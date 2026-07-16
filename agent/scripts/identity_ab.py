@@ -62,6 +62,79 @@ def _load_env() -> None:
         pass
 
 
+# --- Cloud Trace export (opt-in) --------------------------------------------
+def _setup_cloud_and_catcher():
+    """Install ADK's GCP OTel exporters (same as ``adk web --otel_to_cloud``) plus
+    a catcher that records EVERY root span's trace id — one per pass, so we can map
+    User A -> its trace and User B -> its trace.
+
+    Reuses ``live_drive._setup_cloud_telemetry`` for the exporter install; must run
+    BEFORE the agent import so the local ``init_telemetry`` stays out of the way.
+    Returns the catcher (``.trace_ids``) or ``None`` if setup fails.
+    """
+
+    try:
+        from scripts.live_drive import _setup_cloud_telemetry
+
+        _setup_cloud_telemetry()  # exporters + its own single catcher (unused here)
+
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import SpanProcessor
+
+        class _MultiCatcher(SpanProcessor):
+            def __init__(self) -> None:
+                self.trace_ids: list[int] = []
+
+            def on_start(self, span: Any, parent_context: Any = None) -> None:
+                # Root spans (no parent) start one per invocation (per pass).
+                if getattr(span, "parent", None) is None:
+                    self.trace_ids.append(span.get_span_context().trace_id)
+
+        catcher = _MultiCatcher()
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "add_span_processor"):
+            provider.add_span_processor(catcher)
+        return catcher
+    except Exception as exc:  # never let telemetry sink the 403 beat
+        print(f"cloud telemetry setup failed (running without export): {exc}",
+              file=sys.stderr)
+        return None
+
+
+def _flush_and_report(passes: list[dict[str, Any]], *, verify: bool) -> None:
+    """Flush spans, print the Cloud Trace link per pass, and verify User B."""
+
+    from opentelemetry import trace
+
+    provider = trace.get_tracer_provider()
+    if hasattr(provider, "force_flush"):
+        provider.force_flush()
+
+    proj = os.environ.get("GOOGLE_CLOUD_PROJECT")
+    print("\n--- Cloud Trace (the agent's own log) ---")
+    for r in passes:
+        tid = r.get("trace_id")
+        if tid:
+            print(f"  {r['tag']:8} https://console.cloud.google.com/traces/list"
+                  f"?project={proj}&tid={tid}")
+
+    # Verify the User-B trace (the denial) is queryable + summarize its spans.
+    b = next((r for r in passes if r.get("tag") == "USER-B"), None)
+    if verify and b and b.get("trace_id") and proj:
+        try:
+            from scripts.live_drive import _verify_trace
+
+            info = _verify_trace(proj, b["trace_id"])
+            if info.get("found"):
+                print(f"  USER-B verified: {info['span_count']} spans "
+                      f"{info['span_names']}")
+            else:
+                print("  USER-B not queryable yet (ingest lag ~1-2 min) — "
+                      "use the link above.")
+        except Exception as exc:
+            print(f"  verify skipped: {exc}", file=sys.stderr)
+
+
 # --- Drive one session as a given identity ----------------------------------
 async def _run_session(
     prompt: str, target_customer: str, principal: Optional[str], user_id: str
@@ -141,6 +214,7 @@ def _pass(
     principal: Optional[str],
     target: str,
     prompt: str,
+    catcher: Any = None,
 ) -> dict[str, Any]:
     from financial_support.config import reload_settings
 
@@ -154,8 +228,12 @@ def _pass(
         f"\n>> {tag}: case={case} backend={backend} "
         f"scenario={os.environ.get('SCENARIO')} identity={who}"
     )
+    start = len(catcher.trace_ids) if catcher else 0
     res = asyncio.run(_run_session(prompt, target, principal, user_id=f"c3-{tag}"))
     res["tag"] = tag
+    # Map THIS pass's root span -> its trace id (passes run sequentially).
+    if catcher and len(catcher.trace_ids) > start:
+        res["trace_id"] = format(catcher.trace_ids[start], "032x")
     print(
         f"   read={_outcome(res)}  pii={res.get('pii_name') or '—'}  "
         f"tools={'->'.join(res['tool_calls']) or '(none)'}"
@@ -200,6 +278,9 @@ def run(args: argparse.Namespace) -> int:
         )
         return 2
 
+    # Cloud Trace export (opt-in): install exporters BEFORE the first agent import.
+    catcher = _setup_cloud_and_catcher() if args.cloud else None
+
     # Optional S13 "wound": the god-mode SA (no delegated identity) leaks another
     # customer's PII via the MOCK backend — "the architecture allowed it".
     if args.wound:
@@ -211,6 +292,7 @@ def run(args: argparse.Namespace) -> int:
             principal=None,
             target=args.customer,
             prompt=args.prompt,
+            catcher=catcher,
         )
 
     # The climax: same prompt, same target, two identities, real BigQuery + IAM.
@@ -222,6 +304,7 @@ def run(args: argparse.Namespace) -> int:
         principal=principal_a,
         target=args.customer,
         prompt=args.prompt,
+        catcher=catcher,
     )
     b = _pass(
         "USER-B",
@@ -231,8 +314,11 @@ def run(args: argparse.Namespace) -> int:
         principal=principal_b,
         target=args.customer,
         prompt=args.prompt,
+        catcher=catcher,
     )
     _print_ab(a, b)
+    if catcher:
+        _flush_and_report([a, b], verify=args.verify)
 
     # HONESTY GATE — the whole talk rests on this being a REAL 403.
     problems = []
@@ -271,6 +357,15 @@ def main(argv=None) -> int:
     p.add_argument(
         "--wound", action="store_true", help="also run the S13 mock god-mode leak"
     )
+    p.add_argument(
+        "--cloud", action="store_true",
+        help="export the agent's spans to Cloud Trace and print a link per pass",
+    )
+    p.add_argument(
+        "--no-verify", dest="verify", action="store_false",
+        help="with --cloud, skip polling the Cloud Trace API to confirm the trace",
+    )
+    p.set_defaults(verify=True)
     return run(p.parse_args(argv))
 
 
