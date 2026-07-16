@@ -9,7 +9,7 @@
     "generated_at": "2026-07-11"
   },
 
-  "the_edd_boundary": "This is the single most important file for the talk. AgentFlux AUTHORS the 'metrics' and 'managed_baselines' below (subjective judges + Google-managed rubrics). It only SURFACES the 'candidate_constraints' — the hard, deterministic invariants — from the contract; it does NOT author them. Those are hand-curated by the eval owner and are the ONLY things that gate the merge. AgentFlux kills the cold start (it fills the set from day one); the invariant kills the false-green (it catches the money bug the judge waves through). Show + comment on this split on Slide 3 / demo pt.1.",
+  "the_edd_boundary": "This is the single most important file for the talk. AgentFlux AUTHORS the 'metrics' and 'managed_baselines' below (subjective judges + Google-managed rubrics). It only SURFACES the 'candidate_constraints' — the hard, deterministic invariants — from the contract; it does NOT author them. Those are hand-curated by the eval owner and are the ONLY things that gate the merge. AgentFlux kills the cold start (it fills the set from day one); the invariant kills the false-green (it catches the money bug the judge waves through). Show + comment on this split during the cold-start / EDD beat.",
 
   "metrics": [
     {

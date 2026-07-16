@@ -91,8 +91,8 @@ class Verdict:
 def refund_within_charge(refund_amount: float, charge_amount: float) -> Verdict:
     """Invariant P1: a refund must never exceed the original charge.
 
-    This is the green invariant from Slide 2 — the one the LLM judge cannot
-    save you from, because it is about *money*, not tone.
+    This is the green invariant from the cold-open story — the one the LLM
+    judge cannot save you from, because it is about *money*, not tone.
     """
 
     passed = round(float(refund_amount), 2) <= round(float(charge_amount), 2)
