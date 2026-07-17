@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 import time
@@ -103,6 +104,8 @@ async def _run_fleet_local(
             tool_calls: list[str] = []
             final_text = ""
             breaker_open = False
+            fallback_payload = None
+            success_payload = None
             ok, err = True, None
             t0 = time.time()
             try:
@@ -115,8 +118,14 @@ async def _run_fleet_local(
                     if fr_getter:
                         for fr in fr_getter() or []:
                             resp = getattr(fr, "response", None) or {}
-                            if isinstance(resp, dict) and resp.get("status") == "unavailable":
+                            if not isinstance(resp, dict):
+                                continue
+                            if resp.get("status") == "unavailable":
                                 breaker_open = True
+                                fallback_payload = resp
+                            elif (getattr(fr, "name", None) == "issue_refund"
+                                  and resp.get("status") == "refunded"):
+                                success_payload = resp
                     if event.is_final_response() and event.content and event.content.parts:
                         final_text = "".join(p.text or "" for p in event.content.parts)
             except Exception as exc:  # a session dying should not kill the fleet
@@ -137,6 +146,8 @@ async def _run_fleet_local(
                 "tool_calls": tool_calls,
                 "final_text": final_text,
                 "breaker_open": breaker_open,
+                "fallback_payload": fallback_payload,
+                "success_payload": success_payload,
             }
 
     return await asyncio.gather(*[_one(i) for i in range(n)])
@@ -147,6 +158,8 @@ def _run_one_engine(engine, prompt: str, user_id: str) -> dict[str, Any]:
     tool_calls: list[str] = []
     final_text = ""
     breaker_open = False
+    fallback_payload = None
+    success_payload = None
     ok, err = True, None
     t0 = time.time()
     try:
@@ -159,8 +172,13 @@ def _run_one_engine(engine, prompt: str, user_id: str) -> dict[str, Any]:
                 fr = part.get("function_response")
                 if fr:
                     resp = fr.get("response") or {}
-                    if isinstance(resp, dict) and resp.get("status") == "unavailable":
-                        breaker_open = True
+                    if isinstance(resp, dict):
+                        if resp.get("status") == "unavailable":
+                            breaker_open = True
+                            fallback_payload = resp
+                        elif (fr.get("name") == "issue_refund"
+                              and resp.get("status") == "refunded"):
+                            success_payload = resp
                 if part.get("text"):
                     final_text = part["text"]
     except Exception as exc:
@@ -175,6 +193,8 @@ def _run_one_engine(engine, prompt: str, user_id: str) -> dict[str, Any]:
         "tool_calls": tool_calls,
         "final_text": final_text,
         "breaker_open": breaker_open,
+        "fallback_payload": fallback_payload,
+        "success_payload": success_payload,
     }
 
 
@@ -214,6 +234,14 @@ def _aggregate(results: list[dict[str, Any]], target: str) -> dict[str, Any]:
         "p50": _pct(lat, 50),
         "p95": _pct(lat, 95),
         "breaker_open": sum(1 for r in ok if r.get("breaker_open")),
+        "fallback_payload": next(
+            (r["fallback_payload"] for r in results if r.get("fallback_payload")),
+            None,
+        ),
+        "success_payload": next(
+            (r["success_payload"] for r in results if r.get("success_payload")),
+            None,
+        ),
         "target": target,
     }
 
@@ -258,6 +286,38 @@ def _print_single(tag: str, agg: dict[str, Any]) -> None:
     print(f"total tokens  : {_fmt_tokens(agg)}   cost {_fmt_cost(agg)}")
     print(f"latency       : p50 {agg['p50']:.1f}s  p95 {agg['p95']:.1f}s")
     print(f"breaker-open  : {agg['breaker_open']} session(s) hit an open circuit")
+
+
+def _print_tool_results(on: dict[str, Any], off: dict[str, Any] | None = None) -> None:
+    """Show BOTH tool returns side by side (the Slide 10 hero, made literal).
+
+    Same fleet, same code — one call reached the real tool and moved money; the
+    next tripped the open circuit, so the real tool was SKIPPED and the model
+    received an injected fact instead. The success payload is pulled from the ON
+    pass when a session ran before the circuit opened, else from the OFF pass.
+    """
+
+    success = on.get("success_payload") or (off or {}).get("success_payload")
+    fallback = on.get("fallback_payload")
+
+    print("\n=== the two tool returns (Slide 10 hero) ===")
+
+    print("\n[1] request that SUCCEEDED — the real issue_refund ran and moved "
+          "money:")
+    if success:
+        print(json.dumps(success, indent=2, ensure_ascii=False))
+    else:
+        print("  (no successful refund captured this run)")
+
+    print("\n[2] request that TRIPPED THE BREAKER — the real tool was SKIPPED; "
+          "this dict was injected as the tool result:")
+    if fallback:
+        print(json.dumps(fallback, indent=2, ensure_ascii=False))
+        print("  ^ status='unavailable' is a FACT the model acts on (follow the "
+              "fallback), NOT an error it retries. That is the whole twist.")
+    else:
+        print("  (breaker never opened this pass — raise --n or lower "
+              "BREAKER_OPEN_AFTER)")
 
 
 # --- Orchestration ----------------------------------------------------------
@@ -316,9 +376,12 @@ def run(args: argparse.Namespace) -> int:
         _print_single("OFF", off)
         _print_single("ON", on)
         _print_ab(off, on)
+        _print_tool_results(on, off)
     else:
         agg = _pass(args.breaker, args.breaker.upper())
         _print_single(args.breaker.upper(), agg)
+        if args.breaker == "on":
+            _print_tool_results(agg)
     return 0
 
 

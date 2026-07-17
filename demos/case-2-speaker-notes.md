@@ -37,7 +37,7 @@
 > environment — one session at a time. It never saw a fleet.
 >
 > **(reveal 1 — the fleet)** In production it's never one agent. It's the same
-> agent, running as a fleet — many sessions running side by side.
+> agent, running as a fleet — many sessions side by side.
 >
 > **(reveal 2 — converge)** And they all share the same dependencies. They
 > converge on one downstream service.
@@ -47,7 +47,7 @@
 >
 > **(reveal 4 — model misreads)** Here's the part that's specific to agents. A
 > normal system sees a network timeout. The model does not. It reads the timeout
-> as *its own* mistake — it assumes it passed the wrong parameter — so it tries
+> as *its own* mistake. It assumes it passed the wrong parameter, so it tries
 > again.
 >
 > **(reveal 5 — the loop closes)** Now multiply that across the fleet — every
@@ -98,16 +98,16 @@
 > trace tells me. The model call is fast — about a second. This one tool took
 > **fifteen seconds**. That's what I'm going to wrap.
 >
-> **(the twist — inject, don't error · VSCode)** And here's the twist that makes
+> **(the twist — inject, don't error · Cloud Trace)** And here's the twist that makes
 > this an *agent* problem. A normal circuit breaker returns an **error**. The
 > model reads that error and just tries again. So mine works differently. After a
 > couple of failures, it opens. Instead of an error, it **injects a fact into the
-> context**. It tells the model the tool is unavailable, and to follow the fallback
-> rather than retry.
+> context**. It tells the model the tool is unavailable. Follow the fallback — don't
+> retry.
 >
 > **(the fix — watch it recover · dashboard recovery)** Now watch the same fleet
 > with the breaker on. Latency falls back to eight seconds. The breaker starts
-> firing — that's the breaker cutting the blind calls. And throughput climbs all the
+> firing — that's it cutting the blind calls. And throughput climbs all the
 > way back. Same seam from Case 1 — new job.
 >
 > **(optional — the alert)** And that breaker signal isn't just a graph. It's a log
@@ -130,13 +130,14 @@
 | 1 | "…healthy… about eight seconds" | Apontar o trecho **BASELINE** (p50 ~8s, sessões ~24/min) | **Dashboard** |
 | 2 | "watch what it does… stalling… invents the balance" | Apontar o trecho **INCIDENTE** (latência → ~50s, sessões → ~3/min) | **Dashboard** |
 | 3 | "which one is it?… fifteen seconds" | Cortar pra trace: `issue_refund` ~15s vs `call_llm` ~1s | **Cloud Trace** |
-| 4 | "injects a fact… do not retry" | Cortar pro código: `circuit_breaker` → o `return {...}` | **VSCode** |
+| 4 | "injects a fact… do not retry" | Na trace da recuperação, abrir o span **`execute_tool issue_refund`** → atributos **`resilience.breaker.open`** + **`gcp.vertex.agent.tool_response`** (= o dict injetado que o modelo recebeu). Backup: `return {...}` no VSCode | **Cloud Trace** |
 | 5 | "watch the same fleet… climbs all the way back" | Voltar pro dashboard: trecho **RECUPERAÇÃO** (p50 → ~8s, breaker-open sobe, sessões → ~24) | **Dashboard** |
 | 5b · opcional | "a log line you can page on" | Cortar pro Logs Explorer: linha **WARNING** `breaker_open` (`issue_refund`, `elapsed≈15s`) | **Cloud Logging** |
 | 6 | "it's a ladder, organized by the type of failure" | Apontar o painel direito do slide | o próprio slide |
 
-**Sequência de janelas:** Dashboard → Cloud Trace → VSCode → Dashboard → Slide.
-Tudo **pré-gravado** — você narra por cima da linha do tempo, nada roda ao vivo.
+**Sequência de janelas:** Dashboard → Cloud Trace (incidente, 15s) → Cloud Trace
+(recuperação, dict injetado) → Dashboard → Slide. Tudo **pré-gravado** — você narra
+por cima da linha do tempo, nada roda ao vivo.
 
 **🔗 Links (deixar as abas abertas antes de subir ao palco):**
 - **Dashboard (3 atos):** https://console.cloud.google.com/monitoring/dashboards/builder/7111cbc0-edcc-40e7-8b69-c13106afdb34?project=YOUR_PROJECT_ID
@@ -148,7 +149,18 @@ Tudo **pré-gravado** — você narra por cima da linha do tempo, nada roda ao v
     **Gere fresca no dia** (fica na janela recente e o link abre direto):
     `CASE=2 uv run python -m scripts.live_drive --scenario slow_payment --prompt "Refund my \$50 charge TXN-1001."`
     (imprime a nova `tid` — troque no link). Ou expanda o time-range no Cloud Trace.
-- **Código:** `agent/financial_support/callbacks/resilience.py` → `circuit_breaker`
+- **Cloud Trace (dict injetado / breaker aberto — beat 4):** trace verificado 2026-07-17 —
+  https://console.cloud.google.com/traces/list?project=YOUR_PROJECT_ID&tid=8d04d8fff10d937f829abaaac5fc0bbf
+  → trajetória `look_up (ok) → fraud_check (allow) → issue_refund (BREAKER OPEN) → handoff honesto`.
+    No span **`execute_tool issue_refund`**: `resilience.breaker.open=issue_refund` +
+    `gcp.vertex.agent.tool_response` = o dict `unavailable`/"do NOT retry" (o retorno injetado que o
+    modelo recebeu). O prompt completo COM esse retorno = `gcp.vertex.agent.llm_request` no `call_llm`
+    seguinte; a resposta honesta = `gcp.vertex.agent.llm_response`.
+  → ⚠️ contador do breaker é **per-tool + per-processo**; 1 sessão não abre `issue_refund` sozinha (é
+    fenômeno de FROTA). P/ gerar fresco em 1 sessão: pré-setar `resilience._failures["issue_refund"]=5`
+    antes de dirigir. Ingest do Trace **não é atômico** (~1-2 min) — re-consulte antes de achar que faltou span.
+  → receita + os dois retornos (sucesso vs injetado): `demos/case-2-breaker-tool-returns.md`.
+- **Código (backup do beat 4):** `agent/financial_support/callbacks/resilience.py` → `circuit_breaker` (o `return {...}` do dict injetado)
 - **Cloud Logging (breaker aberto):** Logs Explorer com a query
   ```
   logName="projects/YOUR_PROJECT_ID/logs/breaker_events_live"
@@ -203,7 +215,7 @@ Explorer acima (uma linha `breaker_open` no ato recovery).
   passar, mas enquanto a dependência fica lenta ele **fica aberto contendo** — a cura
   da dependência é trabalho do humano via alerta, não automática.
 - **"Sessões/min é rejeição de cliente?"** Não. É **throughput** (interações que
-  completam/min). No incidente cai (22→3) porque **cada sessão demora ~50s** e engasga
+  completam/min). No incidente cai (24→3) porque **cada sessão demora ~50s** e engasga
   — a frota **trava**. Cliente OFF: lento + às vezes **errado** (saldo inventado); e
   sob saturação sustentada, eventualmente timeout/recusa. Cliente ON: **rápido (~8s) e
   honesto** ("não consigo confirmar agora; um humano confirma").
