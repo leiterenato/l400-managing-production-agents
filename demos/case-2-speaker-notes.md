@@ -23,8 +23,8 @@
 ### 🎤 O que você FALA
 > *(transição curta, ~10s, sem demo)*
 > "Case 1 was about **truth** — proving the agent does the right thing. Case 2 is
-> what happens when that *same* agent hits **production**. Now it runs as a fleet,
-> its dependencies degrade, and every call costs money. Resilience and cost, under
+> what happens when that *same* agent hits **production**. Now it runs as a fleet.
+> Its dependencies degrade. And every call costs money. Resilience and cost, under
 > load."
 
 ---
@@ -37,7 +37,7 @@
 > environment — one session at a time. It never saw a fleet.
 >
 > **(reveal 1 — the fleet)** In production it's never one agent. It's the same
-> agent, running as a fleet — many concurrent sessions.
+> agent, running as a fleet — many sessions running side by side.
 >
 > **(reveal 2 — converge)** And they all share the same dependencies. They
 > converge on one downstream service.
@@ -54,9 +54,9 @@
 > session retrying at once. That's a retry storm. And the storm amplifies the very outage it's
 > reacting to. The cycle feeds itself.
 >
-> **(reveal 6 — blast radius)** Four things happen at once. That 2× traffic spike
-> becomes 20× the tokens — the cost explodes. The model endpoint hits its shared
-> quota and starts returning 429s. The agent, instead of admitting it doesn't
+> **(reveal 6 — blast radius)** Four things happen at once. In this case, twice the
+> traffic becomes twenty times the tokens — the cost explodes. The model endpoint
+> hits its shared quota and starts returning 429s. The agent, instead of admitting it doesn't
 > know, invents the balance. And the runtime itself saturates — it was never
 > infinitely elastic.
 >
@@ -107,8 +107,8 @@
 >
 > **(the fix — watch it recover · dashboard recovery)** Now watch the same fleet
 > with the breaker on. Latency falls back to eight seconds. The breaker starts
-> firing — that's it cutting the blind calls. And throughput climbs all the way
-> back. Same seam from Case 1 — new job.
+> firing — that's the breaker cutting the blind calls. And throughput climbs all the
+> way back. Same seam from Case 1 — new job.
 >
 > **(optional — the alert)** And that breaker signal isn't just a graph. It's what
 > you page on. The breaker contains the damage in real time. The alert gets a human
@@ -140,7 +140,7 @@ Tudo **pré-gravado** — você narra por cima da linha do tempo, nada roda ao v
 **🔗 Links (deixar as abas abertas antes de subir ao palco):**
 - **Dashboard (3 atos):** https://console.cloud.google.com/monitoring/dashboards/builder/7111cbc0-edcc-40e7-8b69-c13106afdb34?project=YOUR_PROJECT_ID
   → tiles: latência **p50** (herói, V limpo 8→53→8), breaker-open/min, sessões/min.
-  → janela do run `case2-final`: **hoje ~21:17–21:40 (UTC do VM)** — no console (UTC-3)
+  → janela do run `case2-final` (gravado **2026-07-15**): **~21:17–21:40 (UTC do VM)** — no console (UTC-3)
     aparece **~18:17–18:40**. Ajuste o time-range pra essa faixa.
 - **Cloud Trace (15s):** https://console.cloud.google.com/traces/list?project=YOUR_PROJECT_ID&tid=c129273cbcd5934d60f9473535c036a5
   → ⚠️ **a view filtra pela última hora** — se a trace for antiga aparece vazia.
@@ -197,13 +197,13 @@ BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo --act-seconds 600 
 
 ### 🎤 O que você FALA
 > **(pick up from Slide 10's last line: "what did this cost — and who pays?")**
-> "We survived the incident. Now — what did it cost, and who pays?
+> "So — what did it cost? And who pays?
 >
 > **(reveal 1 — the why)** Why is cost even a problem to begin with? For a normal
 > service, cost scales with traffic — double the traffic, double the bill. For an
 > agent it **compounds**. One request fans out into sub-agents and tool calls.
 > Every turn re-sends the growing context. And retries multiply all of it. That's
-> why, back in **Slide 9**, twice the traffic became twenty times the tokens. It's
+> why the storm turned twice the traffic into twenty times the tokens. It's
 > not bad luck — it's how agent economics behave.
 >
 > **(reveal 2 — honesty beat)** Now the catch. To govern cost, you need the cost
@@ -216,13 +216,13 @@ BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo --act-seconds 600 
 > **(reveal 3 — session · local)** Once you have that number, it does three jobs
 > at three altitudes. First, the **session**. You set a per-session token and step
 > budget. This kills one runaway session in flight — same idea as the breaker, but
-> for spend. Local containment.
+> for spend.
 >
 > **(reveal 4 — project/team · shape spend)** Second, the **team or project**. Now
 > that you can see which decision is expensive, you **route** — Flash for the easy
 > calls, Pro for the hard ones. That routing is your code. There is no managed
-> router. And this is where you size reserved capacity — **Provisioned
-> Throughput** — if you need predictable latency. But capacity is just a
+> router. And this is also where you size reserved capacity — **Provisioned
+> Throughput**. That's for when you need predictable latency. But capacity is just a
 > *purchase*. The engineering is the policy around it.
 >
 > **(reveal 5 — org · global)** Third, the **org**. You tag every call with a
@@ -230,8 +230,8 @@ BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo --act-seconds 600 
 > attribute and govern. Chargeback per tenant. Alerts and quotas per project.
 >
 > **(reveal 6 — payoff)** One instrumented number, three altitudes — session,
-> team, org. That is the difference between getting a scary bill at the end of the
-> month and **governing spend as it happens**. Visibility is not management.
+> team, org. Without it, you get a scary bill at the end of the month. With it, you
+> **govern spend as it happens**. Visibility is not management.
 >
 > **(reveal 7 — bridge to Case 3)** So now the agent is resilient, and its cost is
 > governed. But look at what we've been moving this whole time — refunds,
