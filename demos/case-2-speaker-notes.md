@@ -110,9 +110,9 @@
 > firing — that's the breaker cutting the blind calls. And throughput climbs all the
 > way back. Same seam from Case 1 — new job.
 >
-> **(optional — the alert)** And that breaker signal isn't just a graph. It's what
-> you page on. The breaker contains the damage in real time. The alert gets a human
-> to fix the dependency itself.
+> **(optional — the alert)** And that breaker signal isn't just a graph. It's a log
+> line you can page on. The breaker contains the damage in real time. And an alert on
+> it gets a human to fix the dependency itself.
 >
 > **(the fallback ladder · slide)** And that fallback isn't vague. It's a ladder,
 > organized by the type of failure. If the problem is the model or the quota — a
@@ -132,6 +132,7 @@
 | 3 | "which one is it?… fifteen seconds" | Cortar pra trace: `issue_refund` ~15s vs `call_llm` ~1s | **Cloud Trace** |
 | 4 | "injects a fact… do not retry" | Cortar pro código: `circuit_breaker` → o `return {...}` | **VSCode** |
 | 5 | "watch the same fleet… climbs all the way back" | Voltar pro dashboard: trecho **RECUPERAÇÃO** (p50 → ~8s, breaker-open sobe, sessões → ~24) | **Dashboard** |
+| 5b · opcional | "a log line you can page on" | Cortar pro Logs Explorer: linha **WARNING** `breaker_open` (`issue_refund`, `elapsed≈15s`) | **Cloud Logging** |
 | 6 | "it's a ladder, organized by the type of failure" | Apontar o painel direito do slide | o próprio slide |
 
 **Sequência de janelas:** Dashboard → Cloud Trace → VSCode → Dashboard → Slide.
@@ -148,17 +149,34 @@ Tudo **pré-gravado** — você narra por cima da linha do tempo, nada roda ao v
     `CASE=2 uv run python -m scripts.live_drive --scenario slow_payment --prompt "Refund my \$50 charge TXN-1001."`
     (imprime a nova `tid` — troque no link). Ou expanda o time-range no Cloud Trace.
 - **Código:** `agent/financial_support/callbacks/resilience.py` → `circuit_breaker`
+- **Cloud Logging (breaker aberto):** Logs Explorer com a query
+  ```
+  logName="projects/YOUR_PROJECT_ID/logs/breaker_events_live"
+  jsonPayload.event="breaker_open"
+  ```
+  → uma linha **WARNING** por vez que o circuito abre (`tool=issue_refund`,
+  `reason=slow`, `elapsed_s≈15`). É o *"you page on it"* literal — sinal **real**;
+  **nenhuma alert policy presa** nele (por escolha; dá pra prender em 1 passo). Só
+  emite se o run tiver `BREAKER_AUDIT_LOG=on`. Emitido pelo callback `record_outcome`
+  → `observability/breaker_log.py`.
 
 **Honestidade do dashboard:** são **custom metrics instrumentadas por você**, medidas
 do agente REAL sob carga simulada — **não** as métricas nativas do engine. Isso é
 on-thesis ("você instrumenta o número que o console não te dá"); diga se perguntarem.
 
-**Re-gravar mais perto do dia (~30 min, tokens reais):**
+**Re-gravar mais perto do dia (~25–30 min, tokens reais):** precisa do
+`BREAKER_AUDIT_LOG=on` pra emitir a linha de log do breaker na mesma rodada.
 ```bash
-BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo --act-seconds 600 \
-  --tick-seconds 30 --session-timeout 90 --window-seconds 180 --concurrency 2 \
-  --run-label case2-final
+BREAKER_AUDIT_LOG=on BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo \
+  --act-seconds 480 --tick-seconds 30 --session-timeout 90 --window-seconds 120 \
+  --concurrency 2 --run-label case2-final
 ```
+⚠️ **429 (cota):** em 2026-07-17 a rodada com `--concurrency 3` tomou `429
+RESOURCE_EXHAUSTED` e **sujou o baseline** (os retries do 429 travaram sessões
+"healthy" no cap → mean/p95 estouraram; o p50 sobreviveu). Use `--concurrency 2`. Se
+ainda tomar 429, **use a janela limpa de 07-15** — a série `case2-final` guarda as
+duas rodadas, é só escolher o time-range. Depois valide o log com a query do Logs
+Explorer acima (uma linha `breaker_open` no ato recovery).
 
 **Rede (backup se o dashboard falhar):** a tabela A/B no terminal —
 `BREAKER_OPEN_AFTER=2 uv run python -m scripts.load_test --ab --scenario slow_payment --n 6 --concurrency 2`
@@ -171,14 +189,19 @@ BREAKER_OPEN_AFTER=2 uv run python -m scripts.monitoring_demo --act-seconds 600 
 - O roteamento Pro→Flash é **seu código** — não há router gerenciado.
 - O dashboard é **pré-gravado** e as métricas são **instrumentadas por você** (não
   nativas do engine) — on-thesis, dizer se perguntarem.
+- O **log do breaker** (`breaker_events_live`) é **instrumentação sua** via callback
+  (`BREAKER_AUDIT_LOG=on`) — a plataforma não te dá esse evento; mesma tese do custo/span.
 
 **Perguntas prováveis (respostas prontas):**
 - **"O que o breaker faz quando aciona?"** Dois tempos: (1) *in-band* — degrada com
   a fallback ladder e responde honesto (salva a requisição agora); (2) *out-of-band*
-  — o `breaker_open_count` alimenta uma **alert policy** que **paga o on-call** pra
-  consertar a **causa raiz** (a dependência), enquanto o half-open (sucesso rápido
-  fecha o circuito) **auto-recupera** quando a dependência volta. Breaker = contenção
-  automática; alerta = escalação humana; half-open = cura automática.
+  — ao abrir, emite uma linha **WARNING** no Cloud Logging (`breaker_events_live`,
+  `event=breaker_open`) que você **pode** paginar pra tirar um humano e consertar a
+  **causa raiz** (a dependência). Honesto no palco: o sinal (log) é **real**; **não há
+  alert policy presa** nele hoje — é 1 passo, mas de propósito não montei. E **não há
+  probe half-open automático**: o breaker reseta num sucesso rápido *se* uma chamada
+  passar, mas enquanto a dependência fica lenta ele **fica aberto contendo** — a cura
+  da dependência é trabalho do humano via alerta, não automática.
 - **"Sessões/min é rejeição de cliente?"** Não. É **throughput** (interações que
   completam/min). No incidente cai (22→3) porque **cada sessão demora ~50s** e engasga
   — a frota **trava**. Cliente OFF: lento + às vezes **errado** (saldo inventado); e

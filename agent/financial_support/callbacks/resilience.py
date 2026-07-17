@@ -29,7 +29,7 @@ from google.adk.tools.base_tool import BaseTool
 from google.genai import types
 
 from ..config import get_settings
-from ..observability import cost_log
+from ..observability import breaker_log, cost_log
 from . import telemetry
 
 # Per-dependency failure counters. Process-global on purpose: a deployed instance
@@ -121,10 +121,40 @@ def record_outcome(
     started = tool_context.state.get(_start_key(name))
     elapsed = (time.time() - started) if started is not None else 0.0
 
+    threshold = get_settings().breaker_open_after
+    prev = _failures.get(name, 0)
+
     if status == "error" or elapsed > get_settings().breaker_timeout_s:
-        _failures[name] = _failures.get(name, 0) + 1
+        _failures[name] = prev + 1
+        # Log the CLOSED->OPEN transition exactly ONCE — when the counter crosses
+        # the threshold — so the breaker is a pageable log line, not one entry per
+        # short-circuited call. The `prev < threshold` guard is race-safe: extra
+        # in-flight slow calls that push the counter further never re-log. See
+        # observability/breaker_log.py.
+        if prev < threshold <= _failures[name]:
+            breaker_log.emit_transition(
+                tool_context,
+                tool=name,
+                state="open",
+                reason="error" if status == "error" else "slow",
+                failures=_failures[name],
+                threshold=threshold,
+                elapsed_s=elapsed,
+            )
     else:
-        _failures[name] = 0  # half-open: a fast success closes the circuit
+        # half-open: a fast success closes the circuit. Log the OPEN->CLOSED
+        # recovery once (only if it was actually open), before resetting.
+        if prev >= threshold:
+            breaker_log.emit_transition(
+                tool_context,
+                tool=name,
+                state="closed",
+                reason="recovered",
+                failures=0,
+                threshold=threshold,
+                elapsed_s=elapsed,
+            )
+        _failures[name] = 0
     return None
 
 

@@ -128,6 +128,85 @@ def test_breaker_off_is_a_noop():
     assert resilience._failures["issue_refund"] == 99  # untouched
 
 
+# --- Breaker transition logging (the pageable log line) ---------------------
+
+def test_open_transition_emits_exactly_one_log(monkeypatch):
+    # The signal you page on: one WARNING when the circuit trips, not one per
+    # short-circuited call. Extra in-flight slow completions must not re-log.
+    _set(BREAKER="on", BREAKER_OPEN_AFTER=2, BREAKER_TIMEOUT_S=0.001)
+    calls = []
+    monkeypatch.setattr(
+        resilience.breaker_log, "emit_transition", lambda *a, **k: calls.append(k)
+    )
+    ctx = FakeToolContext()
+    tool = FakeTool("issue_refund")
+    for _ in range(4):  # trips at 2, then stays open
+        ctx.state[resilience._start_key("issue_refund")] = time.time() - 1.0
+        record_outcome(tool, {}, ctx, {"status": "refunded"})
+    opens = [c for c in calls if c["state"] == "open"]
+    assert len(opens) == 1
+    assert opens[0]["tool"] == "issue_refund"
+    assert opens[0]["reason"] == "slow"
+
+
+def test_open_transition_reason_is_error_on_hard_failure(monkeypatch):
+    _set(BREAKER="on", BREAKER_OPEN_AFTER=1)
+    calls = []
+    monkeypatch.setattr(
+        resilience.breaker_log, "emit_transition", lambda *a, **k: calls.append(k)
+    )
+    record_outcome(FakeTool("issue_refund"), {}, FakeToolContext(), {"status": "error"})
+    assert calls and calls[0]["state"] == "open" and calls[0]["reason"] == "error"
+
+
+def test_close_transition_logs_on_recovery(monkeypatch):
+    _set(BREAKER="on", BREAKER_OPEN_AFTER=2, BREAKER_TIMEOUT_S=5.0)
+    calls = []
+    monkeypatch.setattr(
+        resilience.breaker_log, "emit_transition", lambda *a, **k: calls.append(k)
+    )
+    resilience._failures["issue_refund"] = 2  # already open
+    ctx = FakeToolContext()
+    ctx.state[resilience._start_key("issue_refund")] = time.time()  # ~0 elapsed
+    record_outcome(FakeTool("issue_refund"), {}, ctx, {"status": "refunded"})
+    assert resilience._failures["issue_refund"] == 0
+    closes = [c for c in calls if c["state"] == "closed"]
+    assert len(closes) == 1 and closes[0]["reason"] == "recovered"
+
+
+def test_fast_success_below_threshold_does_not_log_close(monkeypatch):
+    # A reset from a not-yet-open counter is not a transition — no log.
+    _set(BREAKER="on", BREAKER_OPEN_AFTER=3, BREAKER_TIMEOUT_S=5.0)
+    calls = []
+    monkeypatch.setattr(
+        resilience.breaker_log, "emit_transition", lambda *a, **k: calls.append(k)
+    )
+    resilience._failures["issue_refund"] = 2  # below threshold, still closed
+    ctx = FakeToolContext()
+    ctx.state[resilience._start_key("issue_refund")] = time.time()
+    record_outcome(FakeTool("issue_refund"), {}, ctx, {"status": "refunded"})
+    assert calls == []
+
+
+def test_transition_emit_is_noop_when_audit_off(monkeypatch):
+    # The emit itself must not even build a logger unless BREAKER_AUDIT_LOG is set.
+    monkeypatch.delenv("BREAKER_AUDIT_LOG", raising=False)
+    built = []
+    monkeypatch.setattr(
+        resilience.breaker_log, "_get_logger", lambda: built.append(1)
+    )
+    resilience.breaker_log.emit_transition(
+        FakeToolContext(),
+        tool="issue_refund",
+        state="open",
+        reason="slow",
+        failures=2,
+        threshold=2,
+        elapsed_s=1.0,
+    )
+    assert built == []
+
+
 # --- Cost per span + per-session budget -------------------------------------
 
 def test_record_cost_accumulates_on_state():
