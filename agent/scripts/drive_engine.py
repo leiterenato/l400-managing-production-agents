@@ -28,11 +28,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-# Same armed engine the monitor watches.
-AGENT_ENGINE = os.environ.get(
-    "AGENT_ENGINE",
-    "projects/YOUR_PROJECT_NUMBER/locations/us-central1/reasoningEngines/ENGINE_ID_CASE1",
-)
+# Same armed engine the monitor watches. Resolved AFTER _load_env() so that
+# agent/.env works too; no default, because a hardcoded fallback would silently
+# drive an engine in someone else's project.
+AGENT_ENGINE = ""
 
 # In-policy $50 refund (below the fraud review threshold of 200, so the agent
 # proceeds and — under an armed deployment — the processor over-pays; that is the
@@ -92,6 +91,17 @@ def _one(engine, prompt: str, user_id: str) -> dict:
 def drive(n: int, prompt: str, user_prefix: str = "prod-traffic",
           concurrency: int = 1) -> int:
     _load_env()
+    engine_name = os.environ.get("AGENT_ENGINE", AGENT_ENGINE)
+    if not engine_name:
+        print(
+            "Set AGENT_ENGINE to the resource name printed by "
+            "deploy/agent_engine.py, e.g.\n"
+            "  export AGENT_ENGINE=projects/<num>/locations/<loc>/"
+            "reasoningEngines/<id>",
+            file=sys.stderr,
+        )
+        return 4
+
     try:
         import vertexai
         from vertexai import agent_engines
@@ -99,13 +109,13 @@ def drive(n: int, prompt: str, user_prefix: str = "prod-traffic",
         print(f"needs google-cloud-aiplatform[agent-engines]: {exc}", file=sys.stderr)
         return 2
 
-    project = AGENT_ENGINE.split("/")[1]
+    project = engine_name.split("/")[1]
     location = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
     vertexai.init(project=project, location=location)
 
-    engine = agent_engines.get(AGENT_ENGINE)
+    engine = agent_engines.get(engine_name)
     concurrency = max(1, min(concurrency, n))
-    print(f"driving {n} request(s) at {AGENT_ENGINE} (concurrency={concurrency})")
+    print(f"driving {n} request(s) at {engine_name} (concurrency={concurrency})")
     print(f"  prompt: {prompt}")
 
     ok = 0
