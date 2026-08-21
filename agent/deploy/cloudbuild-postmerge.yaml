@@ -23,7 +23,7 @@
 
 substitutions:
   _LOCATION: us-central1
-  _STAGING_BUCKET: gs://YOUR_PROJECT_ID-agent-staging
+  _STAGING_BUCKET: gs://YOUR_PROJECT_ID-agent-staging  # override with --substitutions
 
 steps:
   - id: managed-eval-gate

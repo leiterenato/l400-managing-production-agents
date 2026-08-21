@@ -80,20 +80,16 @@ import time
 
 # The deployed, armed engine (financial-support-agent). agentResource uses the
 # project NUMBER form; the OnlineEvaluator filters traces by matching this.
-AGENT_ENGINE = os.environ.get(
-    "AGENT_ENGINE",
-    "projects/YOUR_PROJECT_NUMBER/locations/us-central1/reasoningEngines/ENGINE_ID_CASE1",
-)
+# Required — no default, so this never points at another project's engine.
+#   export AGENT_ENGINE=projects/<num>/locations/<loc>/reasoningEngines/<id>
+AGENT_ENGINE = os.environ.get("AGENT_ENGINE", "")
 
-# Our green invariant, already registered server-side (v3-recursive). Referenced
-# by resource name so the monitor scores production with the SAME rule.
-CUSTOM_METRIC = os.environ.get(
-    "ONLINE_MONITOR_METRIC",
-    # v4: same v3-recursive function AS METRIC_ID but WITH
-    # metadata.scoreRange{0,1,1} — the online evaluator skips a metric with no
-    # score range (state=WARNING). The old id survives for the Camada-2 run.
-    "projects/YOUR_PROJECT_NUMBER/locations/us-central1/evaluationMetrics/METRIC_ID_V4",
-)
+# Our green invariant, registered server-side and referenced by resource name so
+# the monitor scores production with the SAME rule. The metric must carry
+# metadata.scoreRange{0,1,1} — the online evaluator skips one without it
+# (state=WARNING). Required; register the metric first, then export its name:
+#   export ONLINE_MONITOR_METRIC=projects/<num>/locations/<loc>/evaluationMetrics/<id>
+CUSTOM_METRIC = os.environ.get("ONLINE_MONITOR_METRIC", "")
 
 # The one runtime unknown (see docstring). Configurable so a validation error is
 # a one-env-var flip, not a code edit.
@@ -129,6 +125,22 @@ def build_body() -> dict:
     traces) is what the create validation actually requires; ``openTelemetry``
     alone does NOT satisfy it.
     """
+
+    missing = [
+        name
+        for name, value in (
+            ("AGENT_ENGINE", AGENT_ENGINE),
+            ("ONLINE_MONITOR_METRIC", CUSTOM_METRIC),
+        )
+        if not value
+    ]
+    if missing:
+        raise SystemExit(
+            f"Set {' and '.join(missing)} before building the evaluator body.\n"
+            "  AGENT_ENGINE=projects/<num>/locations/<loc>/reasoningEngines/<id>\n"
+            "  ONLINE_MONITOR_METRIC=projects/<num>/locations/<loc>/"
+            "evaluationMetrics/<id>"
+        )
 
     return {
         "displayName": DISPLAY_NAME,

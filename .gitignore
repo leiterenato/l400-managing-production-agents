@@ -219,3 +219,6 @@ __marimo__/
 
 # Claude Code local settings (personal, not shared)
 .claude/settings.local.json
+
+# Claude Code project memory and settings (private working notes)
+.claude/

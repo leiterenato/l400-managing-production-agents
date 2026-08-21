@@ -513,3 +513,22 @@ the merge firing an alert as quality degrades.
 | A trace never appears in Cloud Trace | Ingest lag, or `--no-cloud` / no `--otel_to_cloud` | Wait ~2 min and confirm you passed `--otel_to_cloud`. Setting `OTEL_TO_CLOUD=true` in `.env` does **not** work — it is parsed into `Settings` but no code reads it |
 | `load_test --ab --target engine` is rejected | The deployed breaker state is baked at deploy time, so an in-process flip would make the table a lie | Deploy twice (`BREAKER=off`, then `BREAKER=on` via `UPDATE_RESOURCE`) and drive each separately |
 | `run_offline` prints 4 red invariants | Expected — those are the adversarial cases the checks are meant to catch | Only a **regression** (`EDD_gate=BLOCK MERGE`, exit 1) is a real failure |
+
+---
+
+## Disclaimer and license
+
+This is **sample code written for a conference talk**, not a production
+library. It is optimised to make failure modes visible on stage: it injects
+faults on purpose, ships an intentionally over-refunding scenario, and takes
+shortcuts a real financial system would not. Read it as an illustration of the
+patterns — eval-driven development, semantic circuit breaking, zero-trust data
+access — and not as something to deploy as-is.
+
+Running it costs real money. Every scenario in section 2 makes billable Vertex
+AI calls, and a deployed Agent Engine bills until you delete it (see the
+cleanup snippet in 1.6). Use a dedicated project and tear it down when done.
+
+This is a personal project and is not an officially supported Google product.
+
+Licensed under the [Apache License 2.0](LICENSE).

@@ -19,10 +19,11 @@
 set -uo pipefail
 
 # --- Config (override via env) ----------------------------------------------
-PROJECT="${GOOGLE_CLOUD_PROJECT:-YOUR_PROJECT_ID}"
+PROJECT="${GOOGLE_CLOUD_PROJECT:?set GOOGLE_CLOUD_PROJECT to your project id}"
 LOCATION="${BQ_LOCATION:-us-central1}"
-# The running identity that impersonates the two user SAs (keyless).
-IMPERSONATOR="${IMPERSONATOR:-YOUR_PROJECT_NUMBER-compute@developer.gserviceaccount.com}"
+# The running identity that impersonates the two user SAs (keyless). On a GCE VM
+# this is the default compute SA: <PROJECT_NUMBER>-compute@developer.gserviceaccount.com
+IMPERSONATOR="${IMPERSONATOR:?set IMPERSONATOR to the SA that will impersonate the user SAs}"
 # The two per-user principals. A owns CUST-001; B owns CUST-002 (no access to A).
 SA_A_NAME="${SA_A_NAME:-sa-user-a}"
 SA_B_NAME="${SA_B_NAME:-sa-user-b}"

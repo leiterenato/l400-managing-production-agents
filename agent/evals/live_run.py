@@ -62,11 +62,10 @@ import sys
 import time
 import uuid
 
-# Deployed agent engine (financial-support-agent). Override with AGENT_ENGINE env.
-AGENT_ENGINE = os.environ.get(
-    "AGENT_ENGINE",
-    "projects/YOUR_PROJECT_NUMBER/locations/us-central1/reasoningEngines/ENGINE_ID_CASE1",
-)
+# Deployed agent engine (financial-support-agent). Required — no default, so a
+# missing value fails loudly instead of targeting another project's engine.
+#   export AGENT_ENGINE=projects/<num>/locations/<loc>/reasoningEngines/<id>
+AGENT_ENGINE = os.environ.get("AGENT_ENGINE", "")
 _AGENT_LABEL = "vertex-ai-evaluation-agent-engine-id"
 
 
@@ -426,6 +425,13 @@ def run(mode: str, poll_seconds: int = 900) -> int:
     for enum_name in MANAGED_BASELINES:
         metrics.append(getattr(types.RubricMetric, enum_name))
         print(f"  managed: {enum_name}")
+
+    if not AGENT_ENGINE:
+        raise SystemExit(
+            "Set AGENT_ENGINE to your deployed engine before running:\n"
+            "  export AGENT_ENGINE=projects/<num>/locations/<loc>/"
+            "reasoningEngines/<id>"
+        )
 
     run_name = f"l400-case1-{mode}-{uuid.uuid4().hex[:8]}"
     dest = f"{bucket}/eval-runs/{run_name}"
